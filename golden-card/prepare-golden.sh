@@ -45,6 +45,38 @@ done
 echo "  per-user history and known_hosts cleared"
 
 echo
+echo "== releasing the MAC address back to the boot partition =="
+# The MAC on this robot was set with:
+#   nmcli connection modify "netplan-wlan0-ShineLabs" wifi.cloned-mac-address ...
+# NetworkManager persists that on the root filesystem, which macOS cannot mount
+# and which gets cloned verbatim -- so every clone would come up wearing
+# robot-1's MAC, and a leftover setting here would also override the
+# `macaddress:` that stamp-card.py writes into network-config.
+#
+# Clearing the property on every connection hands control back to the boot
+# partition, where per-card stamping can actually reach it.
+if command -v nmcli >/dev/null; then
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if nmcli -t -f 802-11-wireless.cloned-mac-address connection show "$name" \
+         2>/dev/null | grep -qi '[0-9a-f][0-9a-f]:'; then
+      echo "  clearing cloned-mac-address on '$name'"
+      nmcli connection modify "$name" wifi.cloned-mac-address "" 2>/dev/null || true
+    fi
+  done < <(nmcli -t -f NAME connection show 2>/dev/null)
+else
+  echo "  nmcli not present, skipping"
+fi
+
+# Any netplan write-back file NM created for the same purpose.
+for stale in /etc/netplan/90-NM-*.yaml; do
+  if [[ -f "$stale" ]] && grep -qi "macaddress" "$stale" 2>/dev/null; then
+    echo "  removing $stale (holds a cloned MAC)"
+    rm -f "$stale"
+  fi
+done
+
+echo
 echo "== resetting cloud-init =="
 # Without this, cloud-init on a clone may decide it has already run. Combined
 # with a fresh instance-id per card (stamp-card.py sets that), every clone

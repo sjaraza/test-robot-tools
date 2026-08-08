@@ -274,3 +274,30 @@ stamping nineteen cards. `--base 1` shifts to robot-1 = `:01` if you'd rather.
 Stamp each card **before** its first boot. A clone that boots unstamped comes up
 as a second `robot-1` with robot-1's MAC, which is exactly the mDNS and DHCP
 collision this avoids.
+
+### A note on how the MAC is set
+
+robot-1's MAC was originally set with:
+
+```bash
+sudo nmcli connection modify "netplan-wlan0-ShineLabs" wifi.cloned-mac-address AA:BB:CC:DD:EE:00
+```
+
+That works, but NetworkManager stores it on the **root filesystem**, which macOS
+can't mount and which clones verbatim — so every clone would wear robot-1's MAC,
+and the leftover setting would override the `macaddress:` in `network-config`.
+
+`prepare-golden.sh` therefore clears `cloned-mac-address` from all NM connections
+and removes any `90-NM-*.yaml` netplan write-back holding a MAC. After that the
+boot partition's `network-config` is the single place the MAC is defined, which is
+the only place per-card stamping can reach.
+
+⚠️ Verify this on the first clone before doing the rest:
+
+```bash
+cat /sys/class/net/wlan0/address
+```
+
+If it still shows robot-1's MAC, netplan's `macaddress:` isn't being honoured for
+wifi under the NetworkManager renderer, and the fallback is a `runcmd:` in
+`user-data` running the same `nmcli` command with the per-card value.
