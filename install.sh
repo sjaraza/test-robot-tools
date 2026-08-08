@@ -26,6 +26,21 @@ for dir in "$HOME/picar-x" "$HOME/robot-hat"; do
   fi
 done
 
+# Separately from where the source lives, picarx writes its servo calibration to
+# a path hardcoded as /opt/picar-x. On a fresh robot that directory doesn't
+# exist and /opt is root-owned, so Picarx() fails with
+# "PermissionError: [Errno 13] ... '/opt/picar-x'" -- errno 13 on a missing path
+# because the refusal is on the parent. Confirmed on robot-1. Create and hand
+# over, or every student hits it on their first menu action.
+if [[ ! -d /opt/picar-x ]]; then
+  echo "creating /opt/picar-x (picarx writes its calibration there) ..."
+  sudo mkdir -p /opt/picar-x
+fi
+if [[ ! -w /opt/picar-x ]]; then
+  echo "taking ownership of /opt/picar-x ..."
+  sudo chown -R "$USER":"$USER" /opt/picar-x
+fi
+
 # The splash is generated rather than hardcoded, so each robot shows its own
 # hostname and there's only one copy of the block-letter font. --color is
 # required here: stdout is a pipe into tee, not a terminal, so colour would

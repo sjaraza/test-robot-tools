@@ -553,7 +553,9 @@ HOME_CHECKOUTS = (
     os.path.expanduser("~/robot-hat"),
 )
 
-HARDWARE_DIRS = HOME_CHECKOUTS
+# The libraries live in ~, but picarx writes its calibration to a hardcoded
+# /opt/picar-x. Both matter, for different reasons.
+HARDWARE_DIRS = HOME_CHECKOUTS + ("/opt/picar-x",)
 
 
 def add_home_checkouts_to_path():
@@ -632,8 +634,10 @@ def probe():
 
     for path in HARDWARE_DIRS:
         if not os.path.isdir(path):
-            continue
-        if os.access(path, os.W_OK):
+            print(f"{path:<17} absent"
+                  + ("  -- picarx needs this, run install.sh"
+                     if path.startswith("/opt") else ""))
+        elif os.access(path, os.W_OK):
             print(f"{path:<17} writable")
         else:
             print(f"{path:<17} NOT WRITABLE -- run: "
