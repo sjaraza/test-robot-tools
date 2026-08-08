@@ -11,19 +11,50 @@ Terminal + ssh   ─────────►    splash screen on login
                                update  ->  git pull
 ```
 
-## What a student does
+## Quick start — setting up your robot
+
+Do this once, on your own robot, after you've imaged its card. Three commands.
+
+**1. Log in.** Replace `1` with your robot's number:
 
 ```bash
 ssh robot@robot-1.local
 ```
 
-They're greeted by the splash screen, then:
+**2. Run the setup.** Copy this whole line:
 
-| Type | What it does |
+```bash
+curl -fsSL https://raw.githubusercontent.com/sjaraza/test-robot-tools/main/setup-all.sh | bash
+```
+
+It installs the PiCar-X software and the robot tools. **This takes 30–60 minutes**
+— leave it running and don't close the window. It prints what it's doing as it
+goes, and keeps a log at `~/picarx-install.log`.
+
+**3. Reboot, and log back in:**
+
+```bash
+sudo reboot
+```
+
+Wait a minute, then `ssh robot@robot-1.local` again. You should see a big
+`ROBOT-1` splash screen. Now you can type:
+
+| Command | What it does |
 |---|---|
-| `cockpit` | Take the controls — dashboard and menu |
-| `robostat` | Prints just the stats and exits |
-| `update` | Pulls the latest code from GitHub (only needed now and then) |
+| `cockpit` | Drive the robot, read its sensors, start the camera |
+| `robostat` | Battery, temperature, WiFi signal |
+| `update` | Get the latest version of these tools |
+
+If something looks wrong, run `python3 ~/test-robot-tools/robotmenu.py --probe`
+and show the output to your instructor.
+
+## What a student does day to day
+
+```bash
+ssh robot@robot-1.local
+cockpit
+```
 
 ## robostat — stats without the menu
 
