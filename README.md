@@ -189,3 +189,75 @@ and `rpicam-vid` exist, and the actual method names on the `Picarx` class.
 - Robots are addressed by mDNS name (`robot-3.local`), never by IP.
 - Camera streaming is deliberately **not** here yet — see the
   `camera-streaming-wip` branch for the parked work and why.
+
+## Cloning one robot to nineteen
+
+`golden-card/` holds the tooling. The card is customised by **cloud-init**, whose
+inputs all live on the FAT boot partition — which is the only partition macOS can
+mount, so every per-card edit is doable from a Mac.
+
+### Once, on the golden robot
+
+```bash
+sudo bash ~/test-robot-tools/golden-card/prepare-golden.sh
+sudo shutdown -h now
+```
+
+Clears machine-id, SSH host keys, logs, shell history, and resets cloud-init so
+each clone runs its first boot properly.
+
+### Once, on the Mac
+
+```bash
+diskutil list
+diskutil unmountDisk /dev/diskN
+sudo dd if=/dev/rdiskN of=~/robot-golden.img bs=4m status=progress
+```
+
+Then flash `robot-golden.img` to each card with balenaEtcher.
+
+### Per card, before it ever boots
+
+```bash
+./golden-card/stamp-card.py --table 19     # check the mapping first
+./golden-card/stamp-card.py 7              # stamp the inserted card
+diskutil eject /Volumes/bootfs
+```
+
+That writes four things on the boot partition:
+
+| File | What changes |
+|---|---|
+| `user-data` | `hostname: robot-7` |
+| `meta-data` | `instance-id: robot-7` |
+| `cmdline.txt` | `ds=nocloud;i=robot-7` |
+| `network-config` | `macaddress:` under `wlan0` |
+
+**Why the instance-id matters:** cloud-init only re-runs its per-instance modules
+when the instance-id changes. Bumping it is what makes a clone apply its own
+hostname *and* regenerate SSH host keys, instead of deciding it has already been
+set up. It is set in two places because cloud-init seeds from `cmdline` before
+`meta-data`.
+
+`cmdline.txt` must stay a single line with no trailing newline; the script
+preserves that.
+
+### MAC scheme
+
+robot-1 is `aa:bb:cc:dd:ee:00`, so robot-N gets `N-1`:
+
+```
+robot-1   aa:bb:cc:dd:ee:00
+robot-7   aa:bb:cc:dd:ee:06
+robot-19  aa:bb:cc:dd:ee:18
+```
+
+The last octet is written as plain decimal digits used literally as hex, so
+robot-19 reads `:18` rather than `:12`. Run `--table 19` and eyeball it before
+stamping nineteen cards. `--base 1` shifts to robot-1 = `:01` if you'd rather.
+
+### Order matters
+
+Stamp each card **before** its first boot. A clone that boots unstamped comes up
+as a second `robot-1` with robot-1's MAC, which is exactly the mDNS and DHCP
+collision this avoids.
