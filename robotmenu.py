@@ -1023,7 +1023,10 @@ def pan_tilt():
         return False
 
     pan = tilt = 0
-    step = 5
+    print("\n  Point the camera with the arrow keys.")
+    step = ask_number("  step size in degrees (1-15) [1]: ", 1, 15, 1)
+    if step is None:
+        return False
 
     def apply():
         px.set_cam_pan_angle(pan)
