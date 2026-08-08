@@ -28,10 +28,15 @@ echo "== clearing state that must not be cloned =="
 rm -f /var/lib/dbus/machine-id
 echo "  machine-id cleared"
 
-# SSH host keys. cloud-init regenerates these for a new instance-id anyway, but
-# clearing them means the image itself carries no host identity.
-rm -f /etc/ssh/ssh_host_*
-echo "  SSH host keys removed"
+# SSH host keys are deliberately NOT deleted here.
+#
+# Deleting them looks tidy for a golden image, but if nothing regenerates them
+# before sshd next starts, the robot boots with sshd dead and you are locked out
+# with "Connection refused" -- which happened once and needed card-level
+# recovery. It's also unnecessary: cloud-init's ssh_deletekeys defaults to true,
+# so every clone deletes and regenerates its own host keys when it sees a new
+# instance-id, which stamp-card.py always sets.
+echo "  SSH host keys left in place (cloud-init regenerates per clone)"
 
 apt-get clean || true
 rm -rf /var/log/journal/* /var/log/*.gz /var/log/*.[0-9] 2>/dev/null || true
