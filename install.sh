@@ -18,6 +18,18 @@ fi
 
 chmod +x "$MENU"
 
+# PiCar-X and robot-hat keep calibration data under /opt, root-owned after a
+# fresh install. Without this, creating Picarx() dies with
+# "PermissionError: [Errno 13] ... '/opt/picar-x'".
+for dir in /opt/picar-x /opt/robot-hat; do
+  if [[ -d "$dir" ]]; then
+    if [[ ! -w "$dir" ]]; then
+      echo "taking ownership of $dir ..."
+      sudo chown -R "$USER":"$USER" "$dir"
+    fi
+  fi
+done
+
 # The splash is generated rather than hardcoded, so each robot shows its own
 # hostname and there's only one copy of the block-letter font. --color is
 # required here: stdout is a pipe into tee, not a terminal, so colour would

@@ -11,11 +11,34 @@ misbehaving.
 """
 
 import argparse
+import contextlib
 import os
 import shutil
 import socket
 import sys
 import time
+import warnings
+
+
+@contextlib.contextmanager
+def quiet():
+    """Silence library chatter while we read the hardware.
+
+    robot_hat emits DeprecationWarnings, and anything printed while the frame is
+    being drawn lands in the middle of it. Redirect at the file-descriptor level
+    so writes from C extensions are caught too, not just Python's warnings.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        saved = os.dup(2)
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 2)
+            yield
+        finally:
+            os.dup2(saved, 2)
+            os.close(devnull)
+            os.close(saved)
 
 # ---------------------------------------------------------------------------
 # terminal helpers
@@ -326,27 +349,39 @@ BATTERY_FULL = 8.4
 BATTERY_EMPTY = 6.4
 
 
+_BATTERY_SOURCE = "not tried"
+
+
 def battery_voltage():
-    """Battery volts, or None. Tries the robot_hat APIs in order of preference.
+    """Battery volts, or None. Tries the robot_hat APIs newest-first."""
+    global _BATTERY_SOURCE
+    with quiet():
+        # Current API. The older utils.get_battery_voltage() warns about this.
+        try:
+            from robot_hat import device
+            if hasattr(device, "get_battery_voltage"):
+                _BATTERY_SOURCE = "robot_hat.device.get_battery_voltage()"
+                return float(device.get_battery_voltage())
+        except Exception:
+            pass
 
-    NOTE: not yet verified against real hardware -- if the dashboard shows n/a,
-    run `robotmenu.py --probe` to see which attempt failed and why.
-    """
-    try:
-        from robot_hat import utils
-        if hasattr(utils, "get_battery_voltage"):
-            return float(utils.get_battery_voltage())
-    except Exception:
-        pass
+        try:
+            from robot_hat import utils
+            if hasattr(utils, "get_battery_voltage"):
+                _BATTERY_SOURCE = "robot_hat.utils.get_battery_voltage() (deprecated)"
+                return float(utils.get_battery_voltage())
+        except Exception:
+            pass
 
-    try:
-        from robot_hat import ADC
-        # PiCar-X reads the pack through a divider on A4.
-        raw = ADC("A4").read()
-        return raw / 4095.0 * 3.3 * 3
-    except Exception:
-        pass
+        try:
+            from robot_hat import ADC
+            # PiCar-X reads the pack through a divider on A4.
+            _BATTERY_SOURCE = "ADC('A4') x3 divider"
+            return ADC("A4").read() / 4095.0 * 3.3 * 3
+        except Exception:
+            pass
 
+    _BATTERY_SOURCE = "no working method"
     return None
 
 
@@ -372,7 +407,6 @@ def bar(fraction, width=10, good_high=True):
     colour = GREEN if health > 0.5 else (YELLOW if health > 0.2 else RED)
     return paint("█" * filled, colour) + paint("░" * (width - filled), GREY)
 
-
 def format_uptime(seconds):
     if seconds is None:
         return "n/a"
@@ -388,59 +422,56 @@ def format_uptime(seconds):
 
 
 def dashboard_lines():
-    """The status rows, as (label, value) pairs already coloured."""
+    """The status cells, as (label, value) pairs, already coloured.
+
+    Every reading happens here, before anything is printed, so a chatty library
+    can't scribble into the middle of the frame.
+    """
     rows = []
 
     volts = battery_voltage()
     percent = battery_percent(volts)
     if volts is None:
-        rows.append(("battery", paint("n/a", GREY)
-                     + paint("  (robot_hat not reachable)", GREY)))
+        rows.append(("batt", paint("n/a", GREY)))
     else:
         colour = GREEN if percent > 50 else (YELLOW if percent > 20 else RED)
-        rows.append(("battery",
-                     f"{paint(f'{volts:.2f} V', BOLD, colour)}  "
-                     f"{bar(percent / 100.0)}  {percent:.0f}%"))
+        rows.append(("batt", f"{paint(f'{volts:.2f}V', BOLD, colour)} "
+                             f"{bar(percent / 100.0, 6)} {percent:.0f}%"))
 
     temp = cpu_temperature()
     if temp is None:
-        rows.append(("cpu temp", paint("n/a", GREY)))
+        rows.append(("temp", paint("n/a", GREY)))
     else:
         # The Zero 2 W starts throttling around 80 C.
         colour = GREEN if temp < 60 else (YELLOW if temp < 75 else RED)
-        rows.append(("cpu temp", f"{paint(f'{temp:.1f} °C', colour)}  "
-                                 f"{bar(temp / 85.0, good_high=False)}"))
+        rows.append(("temp", f"{paint(f'{temp:.1f}°C', colour)} "
+                             f"{bar(temp / 85.0, 6, good_high=False)}"))
 
-    load = load_average()
     memory = memory_used_total_mb()
     if memory:
         used, total = memory
-        rows.append(("memory", f"{used:.0f} / {total:.0f} MB  "
-                               f"{bar(used / total, good_high=False)}"))
+        rows.append(("mem", f"{used:.0f}/{total:.0f}MB "
+                            f"{bar(used / total, 6, good_high=False)}"))
+
+    load = load_average()
     if load is not None:
         rows.append(("load", f"{load:.2f}"))
 
     disk = disk_used_total_gb()
     if disk:
         used, total = disk
-        rows.append(("disk", f"{used:.1f} / {total:.1f} GB  "
-                             f"{bar(used / total, good_high=False)}"))
+        rows.append(("disk", f"{used:.1f}/{total:.1f}GB "
+                             f"{bar(used / total, 6, good_high=False)}"))
 
     signal = wifi_signal_dbm()
     if signal is not None:
         # -50 excellent, -70 usable, -80 marginal.
         fraction = max(0.0, min(1.0, (signal + 90) / 40.0))
         colour = GREEN if signal > -60 else (YELLOW if signal > -75 else RED)
-        rows.append(("wifi", f"{paint(f'{signal:.0f} dBm', colour)}  "
-                             f"{bar(fraction)}"))
+        rows.append(("wifi", f"{paint(f'{signal:.0f}dBm', colour)} "
+                             f"{bar(fraction, 6)}"))
 
-    address = ip_address()
-    # gethostname() may already carry a domain (macOS returns "name.local"),
-    # so take the short form and add the suffix ourselves.
-    short_host = socket.gethostname().split(".")[0]
-    rows.append(("address", f"{short_host}.local"
-                            + (f"  ({address})" if address else "")))
-    rows.append(("uptime", format_uptime(uptime_seconds())))
+    rows.append(("up", format_uptime(uptime_seconds())))
 
     flags = throttled_state()
     if flags:
@@ -448,17 +479,37 @@ def dashboard_lines():
     elif flags == []:
         rows.append(("power", paint("healthy", GREEN)))
 
+    # gethostname() may already carry a domain (macOS returns "name.local"),
+    # so take the short form and add the suffix ourselves.
+    short_host = socket.gethostname().split(".")[0]
+    address = ip_address()
+    rows.append(("host", f"{short_host}.local"
+                         + (f"  {paint(address, GREY)}" if address else "")))
+
     return rows
 
 
+def pad(text, width):
+    """Pad to `width` visible columns, ignoring ANSI escapes."""
+    return text + " " * max(0, width - visible_length(text))
+
+
+def cell(label, value, width):
+    return pad(f"{paint(label.rjust(5), GREY)} {value}", width)
+
+
 def draw(menu_items, message=None):
+    # Read everything first. Nothing is printed until the frame is ready, so a
+    # library that logs on import can't break the box.
+    stats = dashboard_lines()
+
     width = min(shutil.get_terminal_size((72, 24)).columns, 72)
     inner = width - 4
+    half = (inner - 2) // 2
     side = paint("│", fg(gradient_colour(0.5))) if COLOUR else "│"
 
     def line(content=""):
-        pad = inner - visible_length(content)
-        print(side + " " + content + " " * max(0, pad) + " " + side)
+        print(side + " " + pad(content, inner) + " " + side)
 
     def rule(left="├", right="┤", fill="─"):
         print(gradient_text(left + fill * (width - 2) + right))
@@ -469,14 +520,22 @@ def draw(menu_items, message=None):
         line(gradient_text(row, bold=True))
     rule()
 
-    for label, value in dashboard_lines():
-        line(f"{paint(label.ljust(9), GREY)} {value}")
+    # Two columns, so the whole frame fits an 80x24 terminal without scrolling.
+    for index in range(0, len(stats), 2):
+        left_label, left_value = stats[index]
+        left = cell(left_label, left_value, half)
+        if index + 1 < len(stats):
+            right_label, right_value = stats[index + 1]
+            right = cell(right_label, right_value, half)
+        else:
+            right = ""
+        line(left + "  " + right)
     rule()
 
     for index, (label, _) in enumerate(menu_items, start=1):
         line(f"  {paint(str(index), BOLD, CYAN)}  {label}")
-    line(f"  {paint('r', BOLD, CYAN)}  Refresh")
-    line(f"  {paint('q', BOLD, CYAN)}  Quit")
+    line(f"  {paint('r', BOLD, CYAN)}  Refresh"
+         f"{'':>4}{paint('q', BOLD, CYAN)}  Quit")
     print(gradient_text("╰" + "─" * (width - 2) + "╯"))
 
     if message:
@@ -503,10 +562,22 @@ def car():
             "  Install the PiCar-X software on this robot first."
         ) from exc
     try:
-        _car = Picarx()
+        with quiet():
+            _car = Picarx()
+    except PermissionError as exc:
+        # picarx stores its servo calibration under /opt, which is root-owned
+        # on a fresh install. This is the most common first-run failure.
+        path = getattr(exc, "filename", None) or "/opt/picar-x"
+        raise RuntimeError(
+            f"no permission to write {path}.\n"
+            "  PiCar-X keeps its calibration there and it's owned by root.\n"
+            "  Fix it once, on the robot:\n\n"
+            f"      sudo chown -R $USER:$USER {path}\n\n"
+            "  Then run this menu again. (install.sh does this for you.)"
+        ) from exc
     except Exception as exc:
         raise RuntimeError(
-            f"picarx is installed but the hardware didn't respond ({exc}).\n"
+            f"picarx is installed but wouldn't start ({type(exc).__name__}: {exc}).\n"
             "  Check the robot-hat is seated and the battery switch is on."
         ) from exc
     return _car
@@ -526,11 +597,21 @@ def probe():
             print(f"{module:<17} FAIL {exc}")
 
     volts = battery_voltage()
-    print(f"battery           {f'{volts:.2f} V' if volts else 'unreadable'}")
+    print(f"battery           {f'{volts:.2f} V' if volts else 'unreadable'}"
+          f"   via {_BATTERY_SOURCE}")
     temp = cpu_temperature()
     print(f"cpu temp          {f'{temp:.1f} °C' if temp else 'unreadable'}")
     print(f"vcgencmd          {shutil.which('vcgencmd') or 'missing'}")
     print(f"rpicam-vid        {shutil.which('rpicam-vid') or 'missing'}")
+
+    for path in ("/opt/picar-x", "/opt/robot-hat"):
+        if not os.path.isdir(path):
+            print(f"{path:<17} absent")
+        elif os.access(path, os.W_OK):
+            print(f"{path:<17} writable")
+        else:
+            print(f"{path:<17} NOT WRITABLE -- run: "
+                  f"sudo chown -R $USER:$USER {path}")
 
     try:
         methods = [m for m in dir(car().__class__) if not m.startswith("_")]
