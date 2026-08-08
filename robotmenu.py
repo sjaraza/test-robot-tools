@@ -801,24 +801,35 @@ def read_distance(px):
 
 def measure_distance():
     px = car()
-
-    def sample():
-        distance = read_distance(px)
-        if distance is None:
-            return None
-        if distance < 0:
-            return paint("no echo — nothing in range", YELLOW)
-        # 30-wide meter spanning 0-200cm; readings above that peg the bar.
-        blocks = int(min(distance, 200) / 200 * 30)
-        colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
-        return (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
-                f"{paint('█' * blocks, colour)}"
-                f"{paint('░' * (30 - blocks), GREY)}")
-
     if read_distance(px) is None:
         print("\n  this robot exposes no ultrasonic reading")
         return False
-    return live_view("Distance", sample)
+
+    previous = [time.monotonic()]
+
+    def sample():
+        distance = read_distance(px)
+        now = time.monotonic()
+        elapsed = now - previous[0]
+        previous[0] = now
+        rate = 1.0 / elapsed if elapsed > 0 else 0.0
+
+        if distance is None:
+            return None
+        if distance < 0:
+            body = paint("no echo — nothing in range", YELLOW)
+        else:
+            # 30-wide meter spanning 0-200cm; readings above that peg the bar.
+            blocks = int(min(distance, 200) / 200 * 30)
+            colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
+            body = (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
+                    f"{paint('█' * blocks, colour)}"
+                    f"{paint('░' * (30 - blocks), GREY)}")
+        return f"{body}  {paint(f'{rate:4.1f}/s', GREY)}"
+
+    # No added delay: the ultrasonic read blocks long enough on its own, and any
+    # sleep on top shows up as the display lagging behind the real world.
+    return live_view("Distance", sample, interval=0.0)
 
 
 def line_sensors():
@@ -851,7 +862,11 @@ def drive_arrows():
         print("\n  arrow-key driving needs a real terminal")
         return False
 
-    speed = 40
+    print("\n  Drive with the arrow keys.")
+    speed = ask_number("  speed (0-100) [10]: ", 0, 100, 10)
+    if speed is None:
+        return False
+
     angle = 0
     moving = None                  # 'forward' | 'backward' | None
     last_command = 0.0
@@ -958,18 +973,62 @@ def steer():
     print(f"  wheels at {angle}°")
 
 
+PAN_RANGE = (-90, 90)
+TILT_RANGE = (-35, 65)
+
+
 def pan_tilt():
+    """Point the camera with the arrow keys."""
     px = car()
-    print("\n  Camera. Pan is left/right, tilt is up/down.")
-    pan = ask_number("  pan (-90 to 90) [0]: ", -90, 90, 0)
-    if pan is None:
-        return
-    tilt = ask_number("  tilt (-35 to 65) [0]: ", -35, 65, 0)
-    if tilt is None:
-        return
-    px.set_cam_pan_angle(pan)
-    px.set_cam_tilt_angle(tilt)
-    print(f"  camera at pan {pan}°, tilt {tilt}°")
+    if not sys.stdin.isatty():
+        print("\n  pan/tilt needs a real terminal")
+        return False
+
+    pan = tilt = 0
+    step = 5
+
+    def apply():
+        px.set_cam_pan_angle(pan)
+        px.set_cam_tilt_angle(tilt)
+
+    print()
+    print(f"  {paint('← →', BOLD, CYAN)} pan   "
+          f"{paint('↑ ↓', BOLD, CYAN)} tilt   "
+          f"{paint('c', BOLD, CYAN)} centre   "
+          f"{paint('q', BOLD, CYAN)} back to the cockpit")
+    print()
+
+    apply()
+    try:
+        with keyboard() as read_key:
+            while True:
+                key = read_key(0.08)
+                if key in ("q", "esc"):
+                    break
+                elif key == "left":
+                    pan = max(PAN_RANGE[0], pan - step)
+                    apply()
+                elif key == "right":
+                    pan = min(PAN_RANGE[1], pan + step)
+                    apply()
+                elif key == "up":
+                    tilt = min(TILT_RANGE[1], tilt + step)
+                    apply()
+                elif key == "down":
+                    tilt = max(TILT_RANGE[0], tilt - step)
+                    apply()
+                elif key == "c":
+                    pan = tilt = 0
+                    apply()
+
+                status_line(f"  pan {paint(f'{pan:+4}', BOLD)}°   "
+                            f"tilt {paint(f'{tilt:+4}', BOLD)}°")
+    except KeyboardInterrupt:
+        pass
+
+    print()
+    print("  camera left where you pointed it")
+    return True
 
 
 def stop_everything():
@@ -989,7 +1048,7 @@ MENU = [
     ("Measure distance", measure_distance),
     ("Drive for a set time", drive),
     ("Steer to an angle", steer),
-    ("Pan / tilt the camera", pan_tilt),
+    ("Point the camera (arrow keys)", pan_tilt),
     ("Read the line sensors", line_sensors),
     ("Stop everything", stop_everything),
     ("Diagnostics", show_probe),
