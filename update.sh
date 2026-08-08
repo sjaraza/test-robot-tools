@@ -13,8 +13,9 @@ echo "updating $REPO_DIR ..."
 BEFORE="$(git rev-parse --short HEAD 2>/dev/null || echo none)"
 
 # --ff-only so a half-finished local edit fails loudly instead of creating a
-# merge commit nobody asked for.
-if ! git pull --ff-only; then
+# merge commit nobody asked for. -q because the object counts and diffstat are
+# noise for a student; the before -> after line below says what matters.
+if ! git pull --ff-only --quiet; then
   echo
   echo "Pull failed. Usually that means this robot has local edits." >&2
   echo "To throw them away and take the version from GitHub:" >&2

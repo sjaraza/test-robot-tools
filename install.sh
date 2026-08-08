@@ -48,12 +48,18 @@ fi
 echo "writing /etc/motd ..."
 python3 "$MENU" --splash --color | sudo tee /etc/motd >/dev/null
 
-echo
-echo "Installed. Now add the aliases (once per robot):"
-echo
-echo "    bash $REPO_DIR/setup-aliases.sh"
-echo "    source ~/.bashrc"
-echo
-echo "That gives you:  cockpit   robostat   update"
-echo
-echo "Log out and back in to see the splash screen."
+# update.sh re-runs this on every pull, so only nag about aliases when they're
+# actually missing. Otherwise this block is pure clutter several times a day.
+if grep -q "alias cockpit=" "$HOME/.bashrc" 2>/dev/null; then
+  echo "done"
+else
+  echo
+  echo "Installed. One more step -- add the aliases:"
+  echo
+  echo "    bash $REPO_DIR/setup-aliases.sh"
+  echo "    source ~/.bashrc"
+  echo
+  echo "That gives you:  cockpit   robostat   update"
+  echo
+  echo "Log out and back in to see the splash screen."
+fi
