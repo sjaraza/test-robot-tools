@@ -678,36 +678,252 @@ def ask_number(prompt, low, high, default):
         print(f"  needs to be between {low} and {high}")
 
 
+def status_line(text):
+    """Overwrite the current terminal line instead of scrolling."""
+    if sys.stdout.isatty():
+        sys.stdout.write("\r\033[K" + text)
+        sys.stdout.flush()
+    else:
+        print(text)
+
+
+@contextlib.contextmanager
+def keyboard():
+    """Yield read_key(timeout) -> key name or None.
+
+    Puts the terminal in cbreak mode so we see keys without waiting for Enter,
+    and always restores it. Arrow keys arrive as escape sequences, so those get
+    reassembled into 'up'/'down'/'left'/'right'. When stdin isn't a terminal the
+    reader always returns None and Ctrl-C remains the way out.
+
+    Reads the file descriptor directly rather than sys.stdin: a buffered text
+    stream pulls the whole "\\x1b[A" burst into its own buffer, after which
+    select() sees an empty fd and the arrow looks like a bare Esc.
+    """
+    if not sys.stdin.isatty():
+        yield lambda timeout=0.1: None
+        return
+
+    import select
+    import termios
+    import tty
+
+    descriptor = sys.stdin.fileno()
+    saved = termios.tcgetattr(descriptor)
+
+    ARROWS = {b"A": "up", b"B": "down", b"C": "right", b"D": "left"}
+
+    def decode(data):
+        """Last recognisable key in `data`.
+
+        Auto-repeat from a held key can deliver several sequences in one read;
+        taking the last keeps the display in step with what's held down.
+        """
+        key = None
+        index = 0
+        while index < len(data):
+            byte = data[index:index + 1]
+            if byte == b"\x1b":
+                if data[index + 1:index + 2] == b"[":
+                    key = ARROWS.get(data[index + 2:index + 3], key)
+                    index += 3
+                    continue
+                key = "esc"
+                index += 1
+                continue
+            if byte == b"\x03":
+                raise KeyboardInterrupt
+            if byte == b" ":
+                key = "space"
+            elif byte in (b"\r", b"\n"):
+                key = "enter"
+            else:
+                key = byte.decode("utf-8", "replace").lower()
+            index += 1
+        return key
+
+    def read_key(timeout=0.1):
+        ready, _, _ = select.select([descriptor], [], [], timeout)
+        if not ready:
+            return None
+        data = os.read(descriptor, 32)
+        if not data:
+            return None
+        return decode(data)
+
+    try:
+        tty.setcbreak(descriptor)
+        yield read_key
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
+
+
+@contextlib.contextmanager
+def any_key_watcher():
+    """Yield a callable that's True once any key has been pressed.
+
+    Ctrl-C isn't obvious to a 15-year-old, so live views stop on any keypress.
+    """
+    with keyboard() as read_key:
+        yield lambda: read_key(0) is not None
+
+
+def live_view(title, sample, interval=0.15):
+    """Run `sample()` on a loop, showing one self-updating line.
+
+    `sample` returns the text to display. Returning None ends the view.
+    """
+    print(f"\n  {title}")
+    print(f"  {paint('press any key to stop', GREY)}\n")
+    with any_key_watcher() as pressed:
+        try:
+            while not pressed():
+                text = sample()
+                if text is None:
+                    break
+                status_line("  " + text)
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            pass
+    print()
+    return True   # skip the "press enter" pause; the keypress was the input
+
+
+def read_distance(px):
+    """Centimetres, or None if this robot exposes no ultrasonic API."""
+    for name in ("get_distance", "ultrasonic"):
+        target = getattr(px, name, None)
+        if target is None:
+            continue
+        return target() if callable(target) else target.read()
+    return None
+
+
 def measure_distance():
     px = car()
-    print("\n  Measuring. Ctrl-C to stop.\n")
+
+    def sample():
+        distance = read_distance(px)
+        if distance is None:
+            return None
+        if distance < 0:
+            return paint("no echo — nothing in range", YELLOW)
+        # 30-wide meter spanning 0-200cm; readings above that peg the bar.
+        blocks = int(min(distance, 200) / 200 * 30)
+        colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
+        return (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
+                f"{paint('█' * blocks, colour)}"
+                f"{paint('░' * (30 - blocks), GREY)}")
+
+    if read_distance(px) is None:
+        print("\n  this robot exposes no ultrasonic reading")
+        return False
+    return live_view("Distance", sample)
+
+
+def line_sensors():
+    px = car()
+    if not hasattr(px, "get_grayscale_data"):
+        print("\n  this robot exposes no grayscale sensor API")
+        return False
+
+    def sample():
+        values = px.get_grayscale_data()
+        return "  ".join(f"{paint(f'{v:5}', BOLD)}" for v in values)
+
+    return live_view("Line sensors  (left  middle  right)", sample, interval=0.2)
+
+
+MAX_STEER = 30          # picarx steering limit, degrees either side
+DEAD_MAN = 0.45         # seconds without a keypress before the motors cut
+
+
+def drive_arrows():
+    """Arrow-key teleop with a dead-man stop.
+
+    Holding an arrow relies on the terminal's key auto-repeat: each repeat
+    refreshes the timer, and DEAD_MAN seconds of silence stops the motors. That
+    matters -- without it, releasing the key over a laggy SSH link would leave
+    the car driving into a wall.
+    """
+    px = car()
+    if not sys.stdin.isatty():
+        print("\n  arrow-key driving needs a real terminal")
+        return False
+
+    speed = 40
+    angle = 0
+    moving = None                  # 'forward' | 'backward' | None
+    last_command = 0.0
+
+    print()
+    print(f"  {paint('↑', BOLD, CYAN)} forward   "
+          f"{paint('↓', BOLD, CYAN)} back   "
+          f"{paint('← →', BOLD, CYAN)} steer   "
+          f"{paint('space', BOLD, CYAN)} stop")
+    print(f"  {paint('+ -', BOLD, CYAN)} speed   "
+          f"{paint('c', BOLD, CYAN)} centre wheels   "
+          f"{paint('q', BOLD, CYAN)} back to the cockpit")
+    print()
+
     try:
-        while True:
-            distance = None
-            for name in ("get_distance", "ultrasonic"):
-                target = getattr(px, name, None)
-                if target is None:
-                    continue
-                distance = target() if callable(target) else target.read()
-                break
-            if distance is None:
-                print("  no ultrasonic reading available")
-                return
-            if distance < 0:
-                print("  no echo (out of range?)")
-            else:
-                blocks = int(min(distance, 100) / 2)
-                colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
-                print(f"  {paint(f'{distance:6.1f} cm', BOLD, colour)} "
-                      f"{paint('█' * blocks, colour)}")
-            time.sleep(0.3)
+        with keyboard() as read_key:
+            while True:
+                key = read_key(0.08)
+                now = time.monotonic()
+
+                if key in ("q", "esc"):
+                    break
+                elif key == "up":
+                    px.forward(speed)
+                    moving, last_command = "forward", now
+                elif key == "down":
+                    px.backward(speed)
+                    moving, last_command = "backward", now
+                elif key == "left":
+                    angle = max(-MAX_STEER, angle - 5)
+                    px.set_dir_servo_angle(angle)
+                elif key == "right":
+                    angle = min(MAX_STEER, angle + 5)
+                    px.set_dir_servo_angle(angle)
+                elif key == "c":
+                    angle = 0
+                    px.set_dir_servo_angle(angle)
+                elif key == "space":
+                    px.stop()
+                    moving = None
+                elif key in ("+", "="):
+                    speed = min(100, speed + 5)
+                elif key in ("-", "_"):
+                    speed = max(0, speed - 5)
+
+                # Dead-man: no fresh command recently means stop.
+                if moving and now - last_command > DEAD_MAN:
+                    px.stop()
+                    moving = None
+
+                state = (paint(moving, BOLD, GREEN) if moving
+                         else paint("stopped", GREY))
+                wheel = ("◀" * (-angle // 5) if angle < 0
+                         else "▶" * (angle // 5)) or "•"
+                status_line(f"  {state:<20} speed {paint(f'{speed:3}', BOLD)}   "
+                            f"steer {paint(f'{angle:+3}', BOLD)}° "
+                            f"{paint(wheel, CYAN)}")
     except KeyboardInterrupt:
-        print("\n  stopped")
+        pass
+    finally:
+        # Whatever happened, do not leave the car driving.
+        px.stop()
+        px.set_dir_servo_angle(0)
+
+    print()
+    print("  stopped, wheels straightened")
+    return True
 
 
 def drive():
     px = car()
-    print("\n  Drive. Speed 0-100, time in seconds.")
+    print("\n  Drive for a set time. Speed 0-100, time in seconds.")
     direction = ask("  forward or backward? [forward]: ", "forward")
     if direction is None:
         return
@@ -756,20 +972,6 @@ def pan_tilt():
     print(f"  camera at pan {pan}°, tilt {tilt}°")
 
 
-def line_sensors():
-    px = car()
-    print("\n  Line sensors. Ctrl-C to stop.\n")
-    try:
-        while True:
-            values = px.get_grayscale_data()
-            print("  " + "  ".join(f"{v:5}" for v in values))
-            time.sleep(0.3)
-    except KeyboardInterrupt:
-        print("\n  stopped")
-    except AttributeError:
-        print("  this robot has no grayscale sensor API")
-
-
 def stop_everything():
     px = car()
     px.stop()
@@ -783,9 +985,10 @@ def show_probe():
 
 
 MENU = [
+    ("Drive with the arrow keys", drive_arrows),
     ("Measure distance", measure_distance),
-    ("Move the car", drive),
-    ("Steer the wheels", steer),
+    ("Drive for a set time", drive),
+    ("Steer to an angle", steer),
     ("Pan / tilt the camera", pan_tilt),
     ("Read the line sensors", line_sensors),
     ("Stop everything", stop_everything),
@@ -808,13 +1011,17 @@ def menu_loop():
             continue
 
         _, handler = MENU[int(choice) - 1]
+        skip_pause = False
         try:
-            handler()
+            # Live views return True: the keypress that stopped them already
+            # served as "I'm done looking at this".
+            skip_pause = bool(handler())
         except RuntimeError as exc:
             print(paint(f"\n  {exc}", RED))
         except KeyboardInterrupt:
             print("\n  interrupted")
-        ask("\n  press enter to go back ")
+        if not skip_pause:
+            ask("\n  press enter to go back ")
 
     # Never leave the motors running on the way out.
     try:
