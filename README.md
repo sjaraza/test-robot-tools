@@ -7,7 +7,7 @@ macOS and Windows 10/11 already ship.
 ```
 STUDENT LAPTOP                 ROBOT (Pi Zero 2 W)
 Terminal + ssh   ─────────►    splash screen on login
-(nothing installed)            launch  ->  menu + dashboard
+(nothing installed)            cockpit  ->  menu + dashboard
                                update  ->  git pull
 ```
 
@@ -21,7 +21,7 @@ They're greeted by the splash screen, then:
 
 | Type | What it does |
 |---|---|
-| `launch` | Opens the dashboard and menu |
+| `cockpit` | Take the controls — dashboard and menu |
 | `robostat` | Prints just the stats and exits |
 | `update` | Pulls the latest code from GitHub (only needed now and then) |
 
@@ -50,12 +50,16 @@ motor load.
 The alias is added by a one-time setup script:
 
 ```bash
-bash ~/test-robot-tools/setup-robostat.sh
+bash ~/test-robot-tools/setup-aliases.sh
 source ~/.bashrc
 ```
 
-Safe to re-run; it won't duplicate the alias. All the reading logic is imported
-from `robotmenu.py`, so `robostat` and the menu can't drift apart.
+Safe to re-run — it rewrites its own managed block in `~/.bashrc` rather than
+appending, so duplicates can't pile up, and it clears out the older `launch`
+alias if a robot still has one. It backs up `~/.bashrc` first.
+
+All the reading logic is imported from `robotmenu.py`, so `robostat` and the
+cockpit can't drift apart.
 
 ## The menu
 
@@ -98,19 +102,20 @@ Motors are always stopped on the way out of an action, including on Ctrl-C.
 ```bash
 git clone https://github.com/sjaraza/test-robot-tools.git ~/test-robot-tools
 bash ~/test-robot-tools/install.sh
+bash ~/test-robot-tools/setup-aliases.sh
+source ~/.bashrc
 ```
 
 `install.sh` writes the splash into `/etc/motd` — generated from the robot's own
-hostname, so `robot-7` shows `ROBOT-7` with no per-card editing. Then add the two
-aliases it prints to `~/.bashrc`:
-
-```bash
-alias launch='python3 ~/test-robot-tools/robotmenu.py'
-alias update='bash ~/test-robot-tools/update.sh'
-```
+hostname, so `robot-7` shows `ROBOT-7` with no per-card editing.
+`setup-aliases.sh` installs `cockpit`, `robostat` and `update`.
 
 `update.sh` re-runs `install.sh` after every pull, so a changed splash or menu
 takes effect right away.
+
+The PiCar-X and robot-hat libraries live in `~/picar-x` and `~/robot-hat` on
+these robots; `install.sh` makes sure they're writable and the menu adds them to
+the Python path if they aren't already importable.
 
 ## Direct use
 

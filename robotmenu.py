@@ -211,9 +211,11 @@ def print_splash():
     for row in banner_rows(robot_name()):
         print("  " + gradient_text(row, bold=True))
     print()
-    print("  " + paint("Type", GREY) + paint("  launch  ", BOLD, CYAN)
-          + paint("to open the robot menu.", GREY))
-    print("  " + paint("Type", GREY) + paint("  update  ", BOLD, CYAN)
+    print("  " + paint("Type", GREY) + paint("  cockpit   ", BOLD, CYAN)
+          + paint("to take the controls.", GREY))
+    print("  " + paint("Type", GREY) + paint("  robostat  ", BOLD, CYAN)
+          + paint("to see the robot's stats.", GREY))
+    print("  " + paint("Type", GREY) + paint("  update    ", BOLD, CYAN)
           + paint("to pull the latest code.", GREY))
     print()
 
@@ -551,7 +553,7 @@ HOME_CHECKOUTS = (
     os.path.expanduser("~/robot-hat"),
 )
 
-HARDWARE_DIRS = ("/opt/picar-x", "/opt/robot-hat") + HOME_CHECKOUTS
+HARDWARE_DIRS = HOME_CHECKOUTS
 
 
 def add_home_checkouts_to_path():
@@ -589,15 +591,14 @@ def car():
         with quiet():
             _car = Picarx()
     except PermissionError as exc:
-        # picarx stores its servo calibration in a directory that's root-owned
-        # after a fresh install. This is the most common first-run failure.
-        path = getattr(exc, "filename", None) or "/opt/picar-x"
+        # picarx writes its servo calibration to a config file. If that path is
+        # outside the home directory it will be root-owned and refuse us.
+        path = getattr(exc, "filename", None) or "the picarx config directory"
         raise RuntimeError(
             f"no permission to write {path}.\n"
-            "  PiCar-X keeps its calibration there and it's owned by root.\n"
-            "  Fix it once, on the robot:\n\n"
-            f"      sudo chown -R $USER:$USER {path}\n\n"
-            "  Then run this menu again. (install.sh does this for you.)"
+            "  PiCar-X keeps its calibration there. Fix it once, on the robot:\n\n"
+            f"      sudo mkdir -p {path}\n"
+            f"      sudo chown -R $USER:$USER {path}\n"
         ) from exc
     except Exception as exc:
         raise RuntimeError(

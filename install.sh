@@ -18,11 +18,8 @@ fi
 
 chmod +x "$MENU"
 
-# PiCar-X and robot-hat keep calibration data in directories that are root-owned
-# after a fresh install. Without this, creating Picarx() dies with
-# "PermissionError: [Errno 13] ... '/opt/picar-x'". The library has used both
-# /opt and the home directory across versions, so cover both.
-for dir in /opt/picar-x /opt/robot-hat "$HOME/picar-x" "$HOME/robot-hat"; do
+# picar-x and robot-hat live in the home directory on these robots.
+for dir in "$HOME/picar-x" "$HOME/robot-hat"; do
   if [[ -d "$dir" && ! -w "$dir" ]]; then
     echo "taking ownership of $dir ..."
     sudo chown -R "$USER":"$USER" "$dir"
@@ -37,11 +34,11 @@ echo "writing /etc/motd ..."
 python3 "$MENU" --splash --color | sudo tee /etc/motd >/dev/null
 
 echo
-echo "Installed. Add these two lines to ~/.bashrc if they aren't there yet:"
+echo "Installed. Now add the aliases (once per robot):"
 echo
-echo "    alias launch='python3 $MENU'"
-echo "    alias update='bash $REPO_DIR/update.sh'"
+echo "    bash $REPO_DIR/setup-aliases.sh"
+echo "    source ~/.bashrc"
 echo
-echo "Then:  source ~/.bashrc"
+echo "That gives you:  cockpit   robostat   update"
 echo
 echo "Log out and back in to see the splash screen."
