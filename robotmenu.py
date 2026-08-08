@@ -899,7 +899,7 @@ def drive_arrows():
     speed = ask_number("  speed (0-100) [10]: ", 0, 100, 10)
     if speed is None:
         return False
-    steer_step = ask_number("  steer step in degrees (1-15) [1]: ", 1, 15, 1)
+    steer_step = ask_number("  steer step in degrees (1-15) [2]: ", 1, 15, 2)
     if steer_step is None:
         return False
 
@@ -1024,7 +1024,7 @@ def pan_tilt():
 
     pan = tilt = 0
     print("\n  Point the camera with the arrow keys.")
-    step = ask_number("  step size in degrees (1-15) [1]: ", 1, 15, 1)
+    step = ask_number("  step size in degrees (1-15) [2]: ", 1, 15, 2)
     if step is None:
         return False
 
