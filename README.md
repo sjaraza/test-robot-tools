@@ -22,7 +22,40 @@ They're greeted by the splash screen, then:
 | Type | What it does |
 |---|---|
 | `launch` | Opens the dashboard and menu |
+| `robostat` | Prints just the stats and exits |
 | `update` | Pulls the latest code from GitHub (only needed now and then) |
+
+## robostat — stats without the menu
+
+```
+╭──────────────────────────────────────────────────────────╮
+│ ROBOT-1                                                  │
+├──────────────────────────────────────────────────────────┤
+│  batt 8.32V ██████ 96%        temp 42.9°C ███░░░         │
+│   mem 202/415MB ███░░░        load 0.13                  │
+│  disk 7.6/28.3GB ██░░░░       wifi -28dBm ██████         │
+│    up 1h 43m                 power healthy               │
+│  host robot-1.local  192.168.1.5                         │
+╰──────────────────────────────────────────────────────────╯
+```
+
+```bash
+robostat            # one snapshot
+robostat --watch    # refresh every 2s, Ctrl-C to stop
+```
+
+`--watch` is the useful one while driving — you can see the battery sag under
+motor load.
+
+The alias is added by a one-time setup script:
+
+```bash
+bash ~/test-robot-tools/setup-robostat.sh
+source ~/.bashrc
+```
+
+Safe to re-run; it won't duplicate the alias. All the reading logic is imported
+from `robotmenu.py`, so `robostat` and the menu can't drift apart.
 
 ## The menu
 

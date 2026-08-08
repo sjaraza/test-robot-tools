@@ -546,6 +546,26 @@ def draw(menu_items, message=None):
 # hardware
 # ---------------------------------------------------------------------------
 
+HOME_CHECKOUTS = (
+    os.path.expanduser("~/picar-x"),
+    os.path.expanduser("~/robot-hat"),
+)
+
+HARDWARE_DIRS = ("/opt/picar-x", "/opt/robot-hat") + HOME_CHECKOUTS
+
+
+def add_home_checkouts_to_path():
+    """Let `import picarx` find a checkout in the home directory.
+
+    On these robots picar-x and robot-hat live in ~, not only site-packages, so
+    add them if they're present. Harmless when the libraries are pip-installed.
+    """
+    for path in HOME_CHECKOUTS:
+        for candidate in (path, os.path.join(path, "lib")):
+            if os.path.isdir(candidate) and candidate not in sys.path:
+                sys.path.append(candidate)
+
+
 _car = None
 
 
@@ -556,17 +576,21 @@ def car():
         return _car
     try:
         from picarx import Picarx
-    except Exception as exc:
-        raise RuntimeError(
-            f"the picarx library isn't available ({exc}).\n"
-            "  Install the PiCar-X software on this robot first."
-        ) from exc
+    except Exception:
+        add_home_checkouts_to_path()
+        try:
+            from picarx import Picarx
+        except Exception as exc:
+            raise RuntimeError(
+                f"the picarx library isn't available ({exc}).\n"
+                "  Install the PiCar-X software on this robot first."
+            ) from exc
     try:
         with quiet():
             _car = Picarx()
     except PermissionError as exc:
-        # picarx stores its servo calibration under /opt, which is root-owned
-        # on a fresh install. This is the most common first-run failure.
+        # picarx stores its servo calibration in a directory that's root-owned
+        # after a fresh install. This is the most common first-run failure.
         path = getattr(exc, "filename", None) or "/opt/picar-x"
         raise RuntimeError(
             f"no permission to write {path}.\n"
@@ -585,6 +609,7 @@ def car():
 
 def probe():
     """Report what we can and can't reach. Handy when something looks wrong."""
+    add_home_checkouts_to_path()   # same paths the menu will use
     print(f"hostname          {socket.gethostname()}")
     print(f"python            {sys.version.split()[0]}")
 
@@ -604,10 +629,10 @@ def probe():
     print(f"vcgencmd          {shutil.which('vcgencmd') or 'missing'}")
     print(f"rpicam-vid        {shutil.which('rpicam-vid') or 'missing'}")
 
-    for path in ("/opt/picar-x", "/opt/robot-hat"):
+    for path in HARDWARE_DIRS:
         if not os.path.isdir(path):
-            print(f"{path:<17} absent")
-        elif os.access(path, os.W_OK):
+            continue
+        if os.access(path, os.W_OK):
             print(f"{path:<17} writable")
         else:
             print(f"{path:<17} NOT WRITABLE -- run: "

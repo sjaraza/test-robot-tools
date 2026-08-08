@@ -18,15 +18,14 @@ fi
 
 chmod +x "$MENU"
 
-# PiCar-X and robot-hat keep calibration data under /opt, root-owned after a
-# fresh install. Without this, creating Picarx() dies with
-# "PermissionError: [Errno 13] ... '/opt/picar-x'".
-for dir in /opt/picar-x /opt/robot-hat; do
-  if [[ -d "$dir" ]]; then
-    if [[ ! -w "$dir" ]]; then
-      echo "taking ownership of $dir ..."
-      sudo chown -R "$USER":"$USER" "$dir"
-    fi
+# PiCar-X and robot-hat keep calibration data in directories that are root-owned
+# after a fresh install. Without this, creating Picarx() dies with
+# "PermissionError: [Errno 13] ... '/opt/picar-x'". The library has used both
+# /opt and the home directory across versions, so cover both.
+for dir in /opt/picar-x /opt/robot-hat "$HOME/picar-x" "$HOME/robot-hat"; do
+  if [[ -d "$dir" && ! -w "$dir" ]]; then
+    echo "taking ownership of $dir ..."
+    sudo chown -R "$USER":"$USER" "$dir"
   fi
 done
 
