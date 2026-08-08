@@ -790,13 +790,46 @@ def live_view(title, sample, interval=0.15):
 
 
 def read_distance(px):
-    """Centimetres, or None if this robot exposes no ultrasonic API."""
+    """One raw reading in centimetres, or None if there's no ultrasonic API."""
     for name in ("get_distance", "ultrasonic"):
         target = getattr(px, name, None)
         if target is None:
             continue
         return target() if callable(target) else target.read()
     return None
+
+
+# An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
+# and the echo from the previous ping lands inside the next measurement window,
+# which reads as wildly wrong distances rather than as noise.
+PING_SPACING = 0.06
+PING_SAMPLES = 3
+
+
+def read_distance_stable(px, samples=PING_SAMPLES):
+    """Median of several spaced readings.
+
+    Returns (distance, used, spread):
+      distance -- median of the valid readings, or -1 if none were valid
+      used     -- how many of `samples` came back valid
+      spread   -- max minus min, i.e. how much the sensor disagreed with itself
+
+    A median rather than a mean because ultrasonic outliers are large and
+    one-sided: a single missed echo would drag an average badly, but can't move
+    the middle value.
+    """
+    values = []
+    for _ in range(samples):
+        time.sleep(PING_SPACING)
+        reading = read_distance(px)
+        if reading is None:
+            return None, 0, 0.0
+        if reading > 0:
+            values.append(float(reading))
+    if not values:
+        return -1.0, 0, 0.0
+    values.sort()
+    return values[len(values) // 2], len(values), values[-1] - values[0]
 
 
 def measure_distance():
@@ -808,7 +841,7 @@ def measure_distance():
     previous = [time.monotonic()]
 
     def sample():
-        distance = read_distance(px)
+        distance, used, spread = read_distance_stable(px)
         now = time.monotonic()
         elapsed = now - previous[0]
         previous[0] = now
@@ -817,19 +850,19 @@ def measure_distance():
         if distance is None:
             return None
         if distance < 0:
-            body = paint("no echo — nothing in range", YELLOW)
-        else:
-            # 30-wide meter spanning 0-200cm; readings above that peg the bar.
-            blocks = int(min(distance, 200) / 200 * 30)
-            colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
-            body = (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
-                    f"{paint('█' * blocks, colour)}"
-                    f"{paint('░' * (30 - blocks), GREY)}")
-        return f"{body}  {paint(f'{rate:4.1f}/s', GREY)}"
+            return paint("no echo — nothing in range", YELLOW)
 
-    # No added delay: the ultrasonic read blocks long enough on its own, and any
-    # sleep on top shows up as the display lagging behind the real world.
-    return live_view("Distance", sample, interval=0.0)
+        colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
+        blocks = int(min(distance, 200) / 200 * 20)
+        # spread is the honest confidence signal: small means the three pings
+        # agreed, large means treat the number with suspicion.
+        confidence = GREEN if spread < 2 else (YELLOW if spread < 10 else RED)
+        return (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
+                f"{paint('█' * blocks, colour)}{paint('░' * (20 - blocks), GREY)}  "
+                f"{paint(f'±{spread:4.1f}', confidence)} "
+                f"{paint(f'n={used}/{PING_SAMPLES}  {rate:3.1f}/s', GREY)}")
+
+    return live_view("Distance  (median of 3 pings)", sample, interval=0.0)
 
 
 def line_sensors():
@@ -866,6 +899,9 @@ def drive_arrows():
     speed = ask_number("  speed (0-100) [10]: ", 0, 100, 10)
     if speed is None:
         return False
+    steer_step = ask_number("  steer step in degrees (1-15) [1]: ", 1, 15, 1)
+    if steer_step is None:
+        return False
 
     angle = 0
     moving = None                  # 'forward' | 'backward' | None
@@ -896,10 +932,10 @@ def drive_arrows():
                     px.backward(speed)
                     moving, last_command = "backward", now
                 elif key == "left":
-                    angle = max(-MAX_STEER, angle - 5)
+                    angle = max(-MAX_STEER, angle - steer_step)
                     px.set_dir_servo_angle(angle)
                 elif key == "right":
-                    angle = min(MAX_STEER, angle + 5)
+                    angle = min(MAX_STEER, angle + steer_step)
                     px.set_dir_servo_angle(angle)
                 elif key == "c":
                     angle = 0
@@ -919,8 +955,10 @@ def drive_arrows():
 
                 state = (paint(moving, BOLD, GREEN) if moving
                          else paint("stopped", GREY))
-                wheel = ("◀" * (-angle // 5) if angle < 0
-                         else "▶" * (angle // 5)) or "•"
+                # Scale the indicator to the full steering range, so it reads
+                # the same whether the step is 1 degree or 15.
+                marks = round(abs(angle) / MAX_STEER * 6)
+                wheel = (("◀" * marks) if angle < 0 else ("▶" * marks)) or "•"
                 status_line(f"  {state:<20} speed {paint(f'{speed:3}', BOLD)}   "
                             f"steer {paint(f'{angle:+3}', BOLD)}° "
                             f"{paint(wheel, CYAN)}")
