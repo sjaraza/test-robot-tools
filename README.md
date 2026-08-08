@@ -301,3 +301,46 @@ cat /sys/class/net/wlan0/address
 If it still shows robot-1's MAC, netplan's `macaddress:` isn't being honoured for
 wifi under the NetworkManager renderer, and the fallback is a `runcmd:` in
 `user-data` running the same `nmcli` command with the per-card value.
+
+## Installing the PiCar-X software on a fresh robot
+
+`setup-picarx.sh` does the whole SunFounder install in one run — `apt` packages,
+robot-hat, vilib, picar-x, and the calibration directory.
+
+```bash
+git clone https://github.com/sjaraza/test-robot-tools.git ~/test-robot-tools
+bash ~/test-robot-tools/setup-picarx.sh
+```
+
+Run it **as the normal user**, not with `sudo` — it calls `sudo` itself where
+needed. Expect 30–60 minutes on a Pi Zero 2 W; vilib pulls in OpenCV and that's
+the longest single step. Everything is logged to `~/picarx-install.log`.
+
+```bash
+bash setup-picarx.sh --skip-upgrade    # skip apt upgrade, much faster
+bash setup-picarx.sh --with-sound      # also run robot-hat's i2samp.sh
+bash setup-picarx.sh --yes             # no confirmation prompt
+```
+
+Safe to re-run: existing checkouts are updated rather than re-cloned.
+
+Before it starts it checks sudo works, GitHub is reachable, there's enough disk
+space, and the clock is sane — a Zero 2 W has no battery-backed clock, and a
+wrong date makes `apt` reject repository metadata in a way that's annoying to
+diagnose.
+
+It also creates `/opt/picar-x` and makes it yours. picarx writes its servo
+calibration to that hardcoded path, and on a fresh system it doesn't exist while
+`/opt` is root-owned, so `Picarx()` otherwise fails with
+`PermissionError: [Errno 13]` — errno 13 on a path that doesn't exist, because
+the refusal comes from the parent directory.
+
+Sound is opt-in because `i2samp.sh` is interactive and offers to reboot. When it
+asks about rebooting, answer **N** and reboot yourself afterwards.
+
+Afterwards:
+
+```bash
+sudo reboot
+python3 ~/test-robot-tools/robotmenu.py --probe
+```
