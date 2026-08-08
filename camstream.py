@@ -295,7 +295,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Pragma", "no-cache")
         self.send_header("Content-Type",
                          "multipart/x-mixed-replace; boundary=FRAME")
+        # An MJPEG stream has no Content-Length and isn't chunked, so under
+        # HTTP/1.1 the only legal way to frame it is "body ends when the
+        # connection closes". Without this the browser can't tell where the body
+        # ends and may buffer indefinitely, showing nothing at all.
+        self.send_header("Connection", "close")
         self.end_headers()
+        self.close_connection = True
 
         last_sent = 0
         try:
