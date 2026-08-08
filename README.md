@@ -75,27 +75,40 @@ undervoltage/throttling warnings. `r` refreshes it.
 │  █  █  █   █ █   █ █   █   █           █         │
 │  █   █  ███  ████   ███    █          ███        │
 ├──────────────────────────────────────────────────┤
-│  battery   7.92 V  ████████░░  76%               │
-│  cpu temp  48.3 °C  ██████░░░░                   │
-│  memory    118 / 420 MB  ███░░░░░░░              │
-│  wifi      -54 dBm  █████████░                   │
-│  address   robot-1.local  (192.168.1.5)          │
-│  uptime    1h 24m                                │
-│  power     healthy                               │
+│  batt 8.32V ██████ 96%     temp 42.9°C ███░░░    │
+│   mem 202/415MB ███░░░     load 0.13             │
+│  disk 7.6/28.3GB ██░░░░    wifi -28dBm ██████    │
+│    up 1h 43m              power healthy          │
+│   cam live · 1 watching    host robot-1.local    │
 ├──────────────────────────────────────────────────┤
-│   1  Measure distance                            │
-│   2  Move the car                                │
-│   3  Steer the wheels                            │
-│   4  Pan / tilt the camera                       │
-│   5  Read the line sensors                       │
-│   6  Stop everything                             │
-│   7  Diagnostics                                 │
-│   r  Refresh                                     │
-│   q  Quit                                        │
+│   1  Drive with the arrow keys                   │
+│   2  Measure distance                            │
+│   3  Drive for a set time                        │
+│   4  Steer to an angle                           │
+│   5  Point the camera (arrow keys)               │
+│   6  Read the line sensors                       │
+│   7  Camera stream on / off                      │
+│   8  Stop everything                             │
+│   9  Diagnostics                                 │
+│   r  Refresh    q  Quit                          │
 ╰──────────────────────────────────────────────────╯
 ```
 
 Motors are always stopped on the way out of an action, including on Ctrl-C.
+
+Arrow-key driving and pan/tilt both ask for a step size first, and driving has a
+0.45s dead-man stop: a terminal has no key-release event, so the motors cut when
+key auto-repeat stops. Without that, letting go over a laggy SSH link would leave
+the car driving into a wall.
+
+Live views (distance, line sensors) update one line in place and stop on **any**
+keypress — Ctrl-C isn't obvious to a 15-year-old.
+
+Distance readings are the median of 3 pings spaced 60ms apart. An HC-SR04 needs
+roughly that long to settle; polling flat out measured 408 reads/s and returned
+wildly wrong numbers, because echoes from earlier pings landed inside the next
+measurement window. The line shows the spread (`±`) so you can see when the
+sensor disagrees with itself.
 
 ## Camera stream
 
@@ -187,8 +200,8 @@ and `rpicam-vid` exist, and the actual method names on the `Picarx` class.
 - The block-letter font covers `ROBOT` and digits. Any other hostname falls back
   to plain text rather than a half-rendered banner.
 - Robots are addressed by mDNS name (`robot-3.local`), never by IP.
-- Camera streaming is deliberately **not** here yet — see the
-  `camera-streaming-wip` branch for the parked work and why.
+- Arrow keys are decoded in both encodings, CSI (`ESC [ A`) and SS3 (`ESC O A`),
+  since PuTTY, tmux and some Windows terminals send the latter.
 
 ## Cloning one robot to nineteen
 
