@@ -97,6 +97,57 @@ undervoltage/throttling warnings. `r` refreshes it.
 
 Motors are always stopped on the way out of an action, including on Ctrl-C.
 
+## Camera stream
+
+Menu item 7 toggles it. Once on, open the printed URL in any browser — nothing
+to install on the laptop, no JavaScript in the page. The browser renders MJPEG
+natively in an `<img>` tag.
+
+```
+http://robot-1.local:8080/
+```
+
+The dashboard shows a `cam` row: `off`, `on · idle`, or `live · 2 watching`.
+
+### Why MJPEG rather than H.264 or WebRTC
+
+MJPEG has no inter-frame prediction, so there's no encoder or decoder buffer to
+fill — a frame displays as soon as it lands. H.264 would use 3–5× less bandwidth
+but a browser can't play a raw H.264 stream from a URL: you'd need WebRTC
+(signalling, SDP, ICE) or Media Source Extensions (JavaScript feeding a
+`SourceBuffer`, plus fMP4 muxing on the robot). Neither is worth it here.
+
+Latency work that's already in place:
+
+- `rpicam-vid --flush`, so frames aren't held in the encoder
+- `TCP_NODELAY`, so Nagle doesn't delay each small write
+- one `write()` per frame, so a frame is one packet burst rather than four
+- a small send buffer, so a network hiccup can't queue up stale frames
+- only the newest frame is kept; a slow viewer skips ahead rather than catching
+  up through old frames
+
+### Bandwidth
+
+The camera only encodes while a browser is watching, and releases itself after
+five idle minutes — so leaving it on costs nothing when nobody's looking.
+
+| Setting | Per robot | 20 robots |
+|---|---|---|
+| 320x240 @ 24fps | ~2–3 Mbps | won't work |
+| 320x240 @ 10fps | ~0.6–1.2 Mbps | marginal |
+| 320x240 @ 5fps | ~0.3 Mbps | fine |
+
+Default is 24fps, which suits one or two robots. The menu asks, so a student can
+drop it. These are estimates — MJPEG size depends on how detailed the scene is.
+
+```bash
+python3 camstream.py --fps 5 --port 8080     # run it directly
+python3 camstream.py --quality 55            # smaller frames, if supported
+```
+
+`--quality` is opt-in because not every `rpicam-vid` build accepts it. The log at
+`/tmp/robotcam.log` will say if it doesn't.
+
 ## Setting up a robot (instructor, once per card)
 
 ```bash

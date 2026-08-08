@@ -15,6 +15,7 @@ import contextlib
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import warnings
@@ -480,6 +481,15 @@ def dashboard_lines():
         rows.append(("power", paint(", ".join(flags), RED, BOLD)))
     elif flags == []:
         rows.append(("power", paint("healthy", GREEN)))
+
+    streaming, status = camera_state()
+    if not streaming:
+        rows.append(("cam", paint("off", GREY)))
+    elif status.get("viewers"):
+        watchers = status["viewers"]
+        rows.append(("cam", paint(f"live · {watchers} watching", GREEN, BOLD)))
+    else:
+        rows.append(("cam", paint("on · idle", YELLOW)))
 
     # gethostname() may already carry a domain (macOS returns "name.local"),
     # so take the short form and add the suffix ourselves.
@@ -1084,6 +1094,122 @@ def pan_tilt():
     return True
 
 
+CAM_PID_FILE = "/tmp/robotcam.pid"
+CAM_STATUS_FILE = "/tmp/robotcam.status"
+CAM_LOG_FILE = "/tmp/robotcam.log"
+
+
+def camera_state():
+    """(running, status_dict). status is {} when the stream isn't up."""
+    try:
+        with open(CAM_PID_FILE) as handle:
+            pid = int(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return False, {}
+    try:
+        os.kill(pid, 0)           # signal 0 just tests existence
+    except OSError:
+        return False, {}
+    try:
+        import json
+        with open(CAM_STATUS_FILE) as handle:
+            return True, json.load(handle)
+    except (OSError, ValueError):
+        return True, {}
+
+
+def camera_url(status):
+    if status.get("url"):
+        return status["url"]
+    port = status.get("port", 8080)
+    return f"http://{socket.gethostname().split('.')[0]}.local:{port}/"
+
+
+def stop_camera():
+    import signal
+    try:
+        with open(CAM_PID_FILE) as handle:
+            pid = int(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    for _ in range(30):
+        time.sleep(0.1)
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+    return True
+
+
+def camera_stream():
+    """Toggle the browser stream on or off."""
+    running, status = camera_state()
+
+    if running:
+        print(f"\n  Stream is on at {camera_url(status)}")
+        answer = ask("  turn it off? [y/N]: ", "n")
+        if answer and answer.lower().startswith("y"):
+            stop_camera()
+            print("  stream stopped, camera released")
+        return False
+
+    print("\n  Start the camera stream.")
+    print("  " + paint("24fps suits one or two robots. Use about 5 if a whole",
+                       GREY))
+    print("  " + paint("class is streaming at once.", GREY))
+    fps = ask_number("  fps (1-30) [24]: ", 1, 30, 24)
+    if fps is None:
+        return False
+
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "camstream.py")
+    if not os.path.exists(script):
+        print(paint(f"  can't find {script}", RED))
+        return False
+
+    # start_new_session so the stream outlives this menu, and its own log file
+    # so a failure to open the camera is recoverable after the fact.
+    with open(CAM_LOG_FILE, "a") as log_handle:
+        subprocess.Popen(
+            [sys.executable, script, "--fps", str(fps)],
+            stdout=log_handle, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+    for _ in range(40):
+        time.sleep(0.1)
+        running, status = camera_state()
+        if running:
+            break
+
+    if not running:
+        print(paint("  the stream didn't start. Last few log lines:", RED))
+        print(tail_file(CAM_LOG_FILE, 8))
+        return False
+
+    print()
+    print("  " + paint("stream is live", GREEN, BOLD))
+    print("  open this on your laptop:")
+    print("  " + paint(camera_url(status), BOLD, CYAN))
+    print()
+    print("  " + paint("The camera only encodes while a browser is watching,",
+                       GREY))
+    print("  " + paint("and releases itself after 5 idle minutes.", GREY))
+    return False
+
+
+def tail_file(path, lines):
+    try:
+        with open(path) as handle:
+            return "".join(handle.readlines()[-lines:]).rstrip()
+    except OSError:
+        return "  (no log)"
+
+
 def stop_everything():
     px = car()
     px.stop()
@@ -1103,6 +1229,7 @@ MENU = [
     ("Steer to an angle", steer),
     ("Point the camera (arrow keys)", pan_tilt),
     ("Read the line sensors", line_sensors),
+    ("Camera stream on / off", camera_stream),
     ("Stop everything", stop_everything),
     ("Diagnostics", show_probe),
 ]
