@@ -716,6 +716,11 @@ def keyboard():
     def decode(data):
         """Last recognisable key in `data`.
 
+        Arrow keys have two encodings and both turn up in practice: CSI
+        ("\\x1b[A") in normal mode, and SS3 ("\\x1bOA") when the terminal is in
+        application-cursor-keys mode, which readline and full-screen programs
+        switch on. Handling only CSI made every arrow look like a bare Esc.
+
         Auto-repeat from a held key can deliver several sequences in one read;
         taking the last keeps the display in step with what's held down.
         """
@@ -724,8 +729,15 @@ def keyboard():
         while index < len(data):
             byte = data[index:index + 1]
             if byte == b"\x1b":
-                if data[index + 1:index + 2] == b"[":
-                    key = ARROWS.get(data[index + 2:index + 3], key)
+                introducer = data[index + 1:index + 2]
+                if introducer in (b"[", b"O"):
+                    final = data[index + 2:index + 3]
+                    if final in ARROWS:
+                        key = ARROWS[final]
+                        index += 3
+                        continue
+                    # Some other escape sequence (function key, mouse report).
+                    # Skip it rather than mistaking it for a keypress.
                     index += 3
                     continue
                 key = "esc"
@@ -899,7 +911,7 @@ def drive_arrows():
     speed = ask_number("  speed (0-100) [10]: ", 0, 100, 10)
     if speed is None:
         return False
-    steer_step = ask_number("  steer step in degrees (1-15) [2]: ", 1, 15, 2)
+    steer_step = ask_number("  steer step in degrees (1-15) [1]: ", 1, 15, 1)
     if steer_step is None:
         return False
 
@@ -1024,7 +1036,7 @@ def pan_tilt():
 
     pan = tilt = 0
     print("\n  Point the camera with the arrow keys.")
-    step = ask_number("  step size in degrees (1-15) [2]: ", 1, 15, 2)
+    step = ask_number("  step size in degrees (1-15) [1]: ", 1, 15, 1)
     if step is None:
         return False
 
