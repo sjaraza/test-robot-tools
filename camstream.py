@@ -103,9 +103,15 @@ class DummyEncoder:
 
     Frames are PNG rather than JPEG because PNG can be written with nothing but
     zlib and struct, both in the standard library.
+
+    Fixed at DUMMY_FPS regardless of --fps: the pattern is drawn pixel by pixel
+    in Python, so a high rate would peg the CPU on a Zero 2 W and a sluggish
+    picture would look like a streaming fault rather than the diagnostic working
+    perfectly well.
     """
 
     mime = "image/png"
+    DUMMY_FPS = 5
 
     # 5x5 digits, drawn as filled blocks, for the frame counter.
     DIGITS = {
@@ -200,7 +206,7 @@ class DummyEncoder:
         return self._png(width, height, rows)
 
     def _pump(self):
-        interval = 1.0 / max(1, self.args.fps)
+        interval = 1.0 / self.DUMMY_FPS
         count = 0
         while not self.stopping.wait(interval):
             count += 1
@@ -214,7 +220,7 @@ class DummyEncoder:
         if self.running:
             return
         log(f"starting test pattern {self.args.width}x{self.args.height} "
-            f"@ {self.args.fps}fps (no camera involved)")
+            f"@ {self.DUMMY_FPS}fps, fixed (no camera involved)")
         self.stopping.clear()
         self.thread = threading.Thread(target=self._pump, daemon=True)
         self.thread.start()
@@ -394,8 +400,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def serve_page(self):
         host = socket.gethostname().split(".")[0]
+        # The test pattern runs at its own fixed rate, so report that rather
+        # than whatever --fps said.
+        fps = getattr(self.encoder, "DUMMY_FPS", self.args.fps)
         body = PAGE.format(host=host, width=self.args.width,
-                           height=self.args.height, fps=self.args.fps,
+                           height=self.args.height, fps=fps,
                            scale=self.args.width * 2).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

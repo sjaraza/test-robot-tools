@@ -1160,18 +1160,26 @@ def camera_stream():
         return False
 
     print("\n  Start the camera stream.")
-    print("  " + paint("24fps suits one or two robots. Use about 5 if a whole",
-                       GREY))
-    print("  " + paint("class is streaming at once.", GREY))
-    fps = ask_number("  fps (1-30) [24]: ", 1, 30, 24)
-    if fps is None:
-        return False
 
     # A synthetic pattern splits "the stream is broken" into two questions: if
     # this shows up in the browser then the network, HTTP path and browser are
     # all fine and the camera is the problem.
     answer = ask("  use a test pattern instead of the camera? [y/N]: ", "n")
     dummy = bool(answer) and answer.lower().startswith("y")
+
+    fps = 5
+    if dummy:
+        print("  " + paint("test pattern runs at a fixed 5fps -- it's drawn in",
+                           GREY))
+        print("  " + paint("Python, so a higher rate would just load the CPU.",
+                           GREY))
+    else:
+        print("  " + paint("24fps suits one or two robots. Use about 5 if a whole",
+                           GREY))
+        print("  " + paint("class is streaming at once.", GREY))
+        fps = ask_number("  fps (1-30) [24]: ", 1, 30, 24)
+        if fps is None:
+            return False
 
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "camstream.py")
