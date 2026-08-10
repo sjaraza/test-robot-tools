@@ -545,8 +545,10 @@ def draw(menu_items, message=None):
     rule()
 
     for index, (label, _) in enumerate(menu_items, start=1):
-        line(f"  {paint(str(index), BOLD, CYAN)}  {label}")
-    line(f"  {paint('r', BOLD, CYAN)}  Refresh"
+        # Right-align the number: with ten or more items, left-aligning shifts
+        # every label by a column.
+        line(f"  {paint(str(index).rjust(2), BOLD, CYAN)}  {label}")
+    line(f"  {paint(' r', BOLD, CYAN)}  Refresh"
          f"{'':>4}{paint('q', BOLD, CYAN)}  Quit")
     print(gradient_text("╰" + "─" * (width - 2) + "╯"))
 
@@ -1165,17 +1167,27 @@ def camera_stream():
     if fps is None:
         return False
 
+    # A synthetic pattern splits "the stream is broken" into two questions: if
+    # this shows up in the browser then the network, HTTP path and browser are
+    # all fine and the camera is the problem.
+    answer = ask("  use a test pattern instead of the camera? [y/N]: ", "n")
+    dummy = bool(answer) and answer.lower().startswith("y")
+
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "camstream.py")
     if not os.path.exists(script):
         print(paint(f"  can't find {script}", RED))
         return False
 
+    command = [sys.executable, script, "--fps", str(fps)]
+    if dummy:
+        command.append("--dummy")
+
     # start_new_session so the stream outlives this menu, and its own log file
     # so a failure to open the camera is recoverable after the fact.
     with open(CAM_LOG_FILE, "a") as log_handle:
         subprocess.Popen(
-            [sys.executable, script, "--fps", str(fps)],
+            command,
             stdout=log_handle, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -1192,13 +1204,43 @@ def camera_stream():
         return False
 
     print()
-    print("  " + paint("stream is live", GREEN, BOLD))
+    print("  " + paint("stream is live", GREEN, BOLD)
+          + (paint("  (test pattern, not the camera)", YELLOW) if dummy else ""))
     print("  open this on your laptop:")
     print("  " + paint(camera_url(status), BOLD, CYAN))
     print()
     print("  " + paint("The camera only encodes while a browser is watching,",
                        GREY))
     print("  " + paint("and releases itself after 5 idle minutes.", GREY))
+    return False
+
+
+def show_camera_log():
+    """The stream's own log. First place to look when it won't play."""
+    print()
+    running, status = camera_state()
+    if running:
+        print("  " + paint(f"stream running at {camera_url(status)}", GREEN))
+        if status:
+            print("  " + paint(f"viewers={status.get('viewers', '?')}  "
+                               f"encoding={status.get('encoding', '?')}  "
+                               f"idle={status.get('idle_seconds', '?')}s", GREY))
+    else:
+        print("  " + paint("stream is not running", GREY))
+
+    print()
+    print("  " + paint(f"{CAM_LOG_FILE}  (last 25 lines)", GREY))
+    print("  " + paint("─" * 50, GREY))
+    text = tail_file(CAM_LOG_FILE, 25)
+    if not text.strip():
+        print("  (empty -- the stream has never been started)")
+    else:
+        for line in text.splitlines():
+            print("  " + line)
+    print("  " + paint("─" * 50, GREY))
+    print()
+    print("  " + paint("If the browser shows nothing, try the test pattern in", GREY))
+    print("  " + paint("the camera menu: it proves whether the camera is at fault.", GREY))
     return False
 
 
@@ -1230,6 +1272,7 @@ MENU = [
     ("Point the camera (arrow keys)", pan_tilt),
     ("Read the line sensors", line_sensors),
     ("Camera stream on / off", camera_stream),
+    ("Camera logs", show_camera_log),
     ("Stop everything", stop_everything),
     ("Diagnostics", show_probe),
 ]

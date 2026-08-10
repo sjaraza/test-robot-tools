@@ -26,10 +26,12 @@ import os
 import shutil
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 import threading
 import time
+import zlib
 
 PID_FILE = "/tmp/robotcam.pid"
 STATUS_FILE = "/tmp/robotcam.status"
@@ -92,8 +94,145 @@ class Broker:
             return self.frame, self.sequence
 
 
+class DummyEncoder:
+    """A synthetic test pattern. No camera, no rpicam-vid, no dependencies.
+
+    Exists to split one question into two: if the test pattern shows up in your
+    browser, the HTTP path, the network and the browser are all fine and the
+    problem is the camera. If even this doesn't show up, the camera is innocent.
+
+    Frames are PNG rather than JPEG because PNG can be written with nothing but
+    zlib and struct, both in the standard library.
+    """
+
+    mime = "image/png"
+
+    # 5x5 digits, drawn as filled blocks, for the frame counter.
+    DIGITS = {
+        "0": ("111", "101", "101", "101", "111"),
+        "1": ("010", "110", "010", "010", "111"),
+        "2": ("111", "001", "111", "100", "111"),
+        "3": ("111", "001", "111", "001", "111"),
+        "4": ("101", "101", "111", "001", "001"),
+        "5": ("111", "100", "111", "001", "111"),
+        "6": ("111", "100", "111", "101", "111"),
+        "7": ("111", "001", "010", "010", "010"),
+        "8": ("111", "101", "111", "101", "111"),
+        "9": ("111", "101", "111", "001", "111"),
+    }
+
+    BARS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+            (255, 0, 255), (255, 0, 0), (0, 0, 255), (30, 30, 30)]
+
+    def __init__(self, args, broker):
+        self.args = args
+        self.broker = broker
+        self.thread = None
+        self.stopping = threading.Event()
+        self.base = self._colour_bars()
+
+    @property
+    def running(self):
+        return self.thread is not None and self.thread.is_alive()
+
+    def _colour_bars(self):
+        """Precompute the static background once; frames only overlay on it."""
+        width, height = self.args.width, self.args.height
+        row = bytearray()
+        for x in range(width):
+            colour = self.BARS[x * len(self.BARS) // width]
+            row += bytes(colour)
+        return [bytes(row) for _ in range(height)]
+
+    @staticmethod
+    def _png(width, height, rows):
+        raw = b"".join(b"\x00" + bytes(row) for row in rows)
+
+        def chunk(tag, data):
+            body = tag + data
+            return (struct.pack(">I", len(data)) + body
+                    + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF))
+
+        header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+        # Level 1: this runs on a 512MB single-board computer and the pattern
+        # compresses well anyway.
+        return (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", header)
+                + chunk(b"IDAT", zlib.compress(raw, 1))
+                + chunk(b"IEND", b""))
+
+    def _frame(self, count):
+        width, height = self.args.width, self.args.height
+        rows = [bytearray(row) for row in self.base]
+
+        # A bar sweeping left to right: proof that frames are actually updating
+        # and not one still image the browser is caching.
+        position = (count * max(2, width // 40)) % width
+        for row in rows:
+            for x in range(position, min(position + 6, width)):
+                row[x * 3:x * 3 + 3] = b"\x00\x00\x00"
+
+        # Frame counter, top left, on a dark band so it stays readable.
+        scale = max(2, height // 40)
+        pad = scale
+        text = str(count % 100000)
+        band_height = 5 * scale + 2 * pad
+        for y in range(min(band_height, height)):
+            rows[y][0:width * 3] = b"\x10\x10\x10" * width
+        for index, char in enumerate(text):
+            glyph = self.DIGITS.get(char)
+            if glyph is None:
+                continue
+            origin_x = pad + index * 4 * scale
+            for gy, line in enumerate(glyph):
+                for gx, bit in enumerate(line):
+                    if bit != "1":
+                        continue
+                    for dy in range(scale):
+                        y = pad + gy * scale + dy
+                        if y >= height:
+                            continue
+                        for dx in range(scale):
+                            x = origin_x + gx * scale + dx
+                            if x < width:
+                                rows[y][x * 3:x * 3 + 3] = b"\xff\xff\xff"
+
+        return self._png(width, height, rows)
+
+    def _pump(self):
+        interval = 1.0 / max(1, self.args.fps)
+        count = 0
+        while not self.stopping.wait(interval):
+            count += 1
+            try:
+                self.broker.publish(self._frame(count))
+            except Exception as exc:      # never let the thread die silently
+                log(f"dummy frame failed: {exc}")
+                break
+
+    def start(self):
+        if self.running:
+            return
+        log(f"starting test pattern {self.args.width}x{self.args.height} "
+            f"@ {self.args.fps}fps (no camera involved)")
+        self.stopping.clear()
+        self.thread = threading.Thread(target=self._pump, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        if not self.running:
+            return
+        log("stopping test pattern (nobody watching)")
+        self.stopping.set()
+        self.thread.join(timeout=3)
+        self.thread = None
+        self.broker.wake_all()
+
+
 class Encoder:
     """rpicam-vid, started on demand and stopped when nobody is watching."""
+
+    mime = "image/jpeg"
 
     def __init__(self, args, broker):
         self.args = args
@@ -315,7 +454,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # One write per frame: several small writes would become several
                 # packets, each adding a round of latency.
                 self.wfile.write(
-                    b"--FRAME\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                    b"--FRAME\r\nContent-Type: " + self.encoder.mime.encode()
+                    + b"\r\nContent-Length: "
                     + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n"
                 )
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
@@ -354,16 +494,19 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--idle-timeout", type=float, default=300.0,
                         help="seconds with no viewer before the camera releases")
+    parser.add_argument("--dummy", action="store_true",
+                        help="serve a synthetic test pattern instead of the "
+                             "camera, to prove the HTTP path works")
     parser.add_argument("--hflip", action="store_true")
     parser.add_argument("--vflip", action="store_true")
     args = parser.parse_args()
 
-    if not shutil.which("rpicam-vid"):
+    if not args.dummy and not shutil.which("rpicam-vid"):
         sys.exit("rpicam-vid not found -- this needs Raspberry Pi OS")
 
     broker = Broker()
     viewers = Viewers()
-    encoder = Encoder(args, broker)
+    encoder = DummyEncoder(args, broker) if args.dummy else Encoder(args, broker)
 
     Handler.args = args
     Handler.broker = broker
