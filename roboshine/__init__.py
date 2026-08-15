@@ -34,13 +34,14 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.4"
+__version__ = "0.5"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
     "steerLeft", "steerRight", "steerStraight",
     "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
-    "get_distance_cm", "wait", "showHelp",
+    "get_distance_cm", "get_line_sensors", "get_line_position",
+    "wait", "showHelp",
 ]
 
 # picarx steering limit, degrees either side of straight.
@@ -277,6 +278,65 @@ def get_distance_cm(samples=PING_SAMPLES):
     return round(readings[len(readings) // 2], 1)
 
 
+# How different the three readings must be before we'll say the line is under one
+# of them. Relative rather than an absolute brightness threshold, so it works on a
+# dark floor or a light one without calibration.
+LINE_MARGIN = 50
+
+
+def get_line_sensors():
+    """The three line sensors under the front of the robot.
+
+    Returns (left, middle, right) as numbers. Lower means darker, so a black line
+    on a white floor reads *lower* than the floor around it.
+
+        left, middle, right = get_line_sensors()
+        print(left, middle, right)
+
+    Numbers depend on your floor and the lighting, so print them and look before
+    writing rules about them.
+    """
+    car = _hardware()
+    reader = getattr(car, "get_grayscale_data", None)
+    if reader is None:
+        raise RuntimeError("this robot has no line sensors fitted")
+
+    values = reader()
+    if not values or len(values) < 3:
+        raise RuntimeError(f"expected three sensor readings, got {values!r}")
+    return tuple(int(v) for v in values[:3])
+
+
+def get_line_position(margin=LINE_MARGIN):
+    """Which sensor can see the line: 'left', 'centre', 'right', or 'lost'.
+
+        while True:
+            where = get_line_position()
+            if where == 'left':
+                steerLeft(15)
+            elif where == 'right':
+                steerRight(15)
+            else:
+                steerStraight()
+
+    'lost' means all three sensors read about the same -- either the line isn't
+    under the robot at all, or all three are sitting on it.
+
+    Works out which sensor is darkest rather than comparing against a fixed
+    brightness, so it doesn't need calibrating for your floor. If the three
+    readings are within `margin` of each other it reports 'lost' instead of
+    guessing.
+    """
+    left, middle, right = get_line_sensors()
+    readings = (left, middle, right)
+
+    if max(readings) - min(readings) < margin:
+        return "lost"
+
+    darkest = readings.index(min(readings))
+    return ("left", "centre", "right")[darkest]
+
+
 def wait(seconds):
     """Do nothing for a while. The robot keeps doing whatever it was doing.
 
@@ -325,6 +385,16 @@ roboshine {__version__} -- robot commands you can use in your own scripts
   SENSING
     get_distance_cm()
         Centimetres to the thing in front. -1 means nothing is in range.
+
+    get_line_sensors()
+        The three sensors underneath, as (left, middle, right).
+        Lower numbers are darker, so a black line reads lower than the floor.
+
+    get_line_position()
+        Which sensor sees the line: 'left', 'centre', 'right' or 'lost'.
+        Example:
+          where = get_line_position()
+          if where == 'left':  steerLeft(15)
 
   OTHER
     wait(seconds)     pause your script; the robot carries on

@@ -373,12 +373,45 @@ robot.stop()
 | `lookUp(degrees=65)` / `lookDown(degrees=35)` | tilt the camera |
 | `lookStraight()` | camera straight ahead and level |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
+| `get_line_sensors()` | the three sensors underneath as `(left, middle, right)` |
+| `get_line_position()` | `'left'`, `'centre'`, `'right'` or `'lost'` |
 | `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
 
 ```bash
 python3 -c "import roboshine; roboshine.showHelp()"
 python3 ~/test-robot-tools/examples/my_first_drive.py
+python3 ~/test-robot-tools/examples/line_follow.py
+```
+
+### Line following
+
+`get_line_position()` reports which of the three sensors can see the line, so a
+first line follower is a handful of lines:
+
+```python
+where = robot.get_line_position()
+if where == 'left':
+    robot.steerLeft(15)
+elif where == 'right':
+    robot.steerRight(15)
+else:
+    robot.steerStraight()
+```
+
+It works out which sensor is *darkest* rather than comparing against a fixed
+brightness, so there's nothing to calibrate for a particular floor or lighting.
+When all three readings are within about 50 of each other it reports `'lost'`
+instead of guessing — that means either the line isn't under the robot, or all
+three sensors are sitting on it.
+
+`examples/line_follow.py` is a working follower, including giving up rather than
+driving off across the room when the line disappears for good.
+
+Check what the sensors see before writing rules about the numbers:
+
+```bash
+python3 -c "import roboshine as r; print(r.get_line_sensors())"
 ```
 
 **Steering and driving are separate commands.** A curve is two steps: point the
