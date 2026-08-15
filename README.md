@@ -220,8 +220,26 @@ source ~/.bashrc
 hostname, so `robot-7` shows `ROBOT-7` with no per-card editing.
 `setup-aliases.sh` installs `cockpit`, `robostat` and `update`.
 
-`update.sh` re-runs `install.sh` after every pull, so a changed splash or menu
-takes effect right away.
+### `update` is the one command to remember
+
+```bash
+update
+```
+
+Pulls, then refreshes the splash, roboshine's import path and the aliases, and
+installs mosh if it's missing. Built to be run often:
+
+- **No sudo unless something changed.** The splash is only written to `/etc/motd`
+  when it actually differs, so a routine `update` doesn't ask for a password.
+- **No clutter.** `~/.bashrc` is only rewritten when the aliases differ, and
+  there's a single `~/.bashrc.robotbak` rather than one backup per run.
+- **New aliases arrive automatically.** As the tools grow, a student who only
+  ever types `update` still ends up with them.
+- **It never touches robot-hat, vilib or picar-x.** Those are 30–60 minutes and
+  belong to `setup-picarx.sh`.
+
+`setup-all.sh` is for the *first* run — it installs the PiCar-X libraries, then
+calls `update.sh` for everything else, so the two can't drift apart.
 
 The PiCar-X and robot-hat libraries live in `~/picar-x` and `~/robot-hat` on
 these robots; `install.sh` makes sure they're writable and the menu adds them to

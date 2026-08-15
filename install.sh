@@ -82,8 +82,18 @@ fi
 # hostname and there's only one copy of the block-letter font. --color is
 # required here: stdout is a pipe into tee, not a terminal, so colour would
 # otherwise be stripped out of the motd.
-echo "writing /etc/motd ..."
-python3 "$MENU" --splash --color | sudo tee /etc/motd >/dev/null
+# Only write it if it differs. Writing needs sudo, and students run `update`
+# often -- a password prompt on every run for a file that didn't change is the
+# kind of friction that stops people updating at all.
+NEW_MOTD="$(mktemp)"
+trap 'rm -f "$NEW_MOTD"' EXIT
+python3 "$MENU" --splash --color > "$NEW_MOTD"
+if cmp -s "$NEW_MOTD" /etc/motd 2>/dev/null; then
+  echo "splash screen already current"
+else
+  echo "writing /etc/motd ..."
+  sudo tee /etc/motd < "$NEW_MOTD" >/dev/null
+fi
 
 # update.sh re-runs this on every pull, so only nag about aliases when they're
 # actually missing. Otherwise this block is pure clutter several times a day.

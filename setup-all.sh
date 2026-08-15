@@ -12,9 +12,10 @@
 # It runs, in order:
 #   1. clone or update this repo
 #   2. setup-picarx.sh   -- robot-hat, vilib, picar-x  (the slow part)
-#   3. setup-mosh.sh     -- mosh, if it isn't there yet
-#   4. install.sh        -- the login splash, and roboshine's import path
-#   5. setup-aliases.sh  -- cockpit / robostat / update / sb / eb / robotreboot
+#   3. update.sh         -- splash, roboshine path, aliases, mosh
+#
+# Day to day you only need `update`. This script exists for the first run, when
+# the PiCar-X libraries still have to be installed.
 #
 # Options are passed through to setup-picarx.sh:
 #   --skip-libs       the PiCar-X software is already installed, skip step 2
@@ -78,24 +79,12 @@ else
     || die "PiCar-X install failed -- see ~/picarx-install.log"
 fi
 
-# --- 3. mosh ---------------------------------------------------------------
-# Its own step rather than part of setup-picarx.sh's package list: that whole
-# step is skipped once the libraries import, so a robot set up before mosh
-# existed would never have got it.
-say "3. mosh"
-if command -v mosh-server >/dev/null; then
-  ok "already installed"
-else
-  bash "$REPO_DIR/setup-mosh.sh" || echo "  ${YELLOW}!${OFF}   mosh setup had trouble; carrying on"
-fi
-
-# --- 4. splash screen ------------------------------------------------------
-say "4. Login splash screen"
-bash "$REPO_DIR/install.sh" || die "install.sh failed"
-
-# --- 5. aliases ------------------------------------------------------------
-say "5. Aliases"
-bash "$REPO_DIR/setup-aliases.sh" || die "setup-aliases.sh failed"
+# --- 3. everything else ----------------------------------------------------
+# Delegated to update.sh rather than repeated here: splash, roboshine's import
+# path, aliases and mosh. One code path means `update` and `setup-all` can't
+# drift apart.
+say "3. Splash, aliases, mosh"
+bash "$REPO_DIR/update.sh" || die "update.sh failed"
 
 # ---------------------------------------------------------------------------
 echo

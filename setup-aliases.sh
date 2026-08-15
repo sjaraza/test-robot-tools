@@ -33,7 +33,6 @@ done
 chmod +x "$REPO_DIR"/robotmenu.py "$REPO_DIR"/robostat.py "$REPO_DIR"/*.sh
 
 touch "$BASHRC"
-cp "$BASHRC" "$BASHRC.bak.$(date +%Y%m%d%H%M%S)"
 
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
@@ -50,7 +49,11 @@ awk -v b="$BEGIN" -v e="$END" '
   { print }
 ' "$BASHRC" > "$TMP"
 
-# Collapse any trailing blank lines the removal left behind, then add the block.
+# Build the new file, then only replace ~/.bashrc if it actually differs.
+# Students are told to run `update` often, and a backup file per run -- plus a
+# rewritten .bashrc that changed nothing -- would be pure noise.
+NEW="$(mktemp)"
+trap 'rm -f "$TMP" "$NEW"' EXIT
 {
   awk 'BEGIN{blank=0} {if ($0=="") {blank++} else {while(blank>0){print ""; blank--}; print}}' "$TMP"
   echo
@@ -63,10 +66,18 @@ awk -v b="$BEGIN" -v e="$END" '
   echo "alias robotreboot='sudo systemctl reboot'"
   echo "alias robotoff='sudo systemctl poweroff'"
   echo "$END"
-} > "$BASHRC"
+} > "$NEW"
+
+if cmp -s "$NEW" "$BASHRC"; then
+  echo "aliases already up to date"
+  exit 0
+fi
+
+cp "$BASHRC" "$BASHRC.robotbak"        # one backup, overwritten, not one per run
+cat "$NEW" > "$BASHRC"
 
 echo "aliases written to $BASHRC"
-echo "  (a backup of the previous file is alongside it)"
+echo "  (previous version saved as ~/.bashrc.robotbak)"
 echo
 echo "Run this once to use them in the current session:"
 echo
