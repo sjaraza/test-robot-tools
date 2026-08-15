@@ -45,23 +45,32 @@ fi
 # A .pth file in the user's site-packages just adds this repo to Python's path,
 # so `update` keeps the library current with no reinstall step -- which pip
 # install would have required after every pull.
-# An SSH login runs bash as a *login* shell, which reads ~/.profile rather than
-# ~/.bashrc. Debian's default ~/.profile sources ~/.bashrc for you, so aliases
-# normally work on login already -- but if that file was replaced or trimmed,
-# nothing would load and the reason would be very unobvious. Make it certain.
+# An SSH login runs bash as a *login* shell, which does NOT read ~/.bashrc. It
+# reads the FIRST of ~/.bash_profile, ~/.bash_login, ~/.profile that exists and
+# ignores the others. Debian's default ~/.profile sources ~/.bashrc, which is why
+# this usually works -- but if a ~/.bash_profile exists it wins, ~/.profile is
+# never read, and no aliases load. Target whichever file bash will actually use.
 echo "checking login shells read ~/.bashrc ..."
-PROFILE="$HOME/.profile"
-if [[ -f "$PROFILE" ]] && grep -q '\.bashrc' "$PROFILE"; then
-  echo "  yes, ~/.profile already sources it"
+LOGIN_FILE=""
+for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+  if [[ -f "$candidate" ]]; then
+    LOGIN_FILE="$candidate"
+    break
+  fi
+done
+LOGIN_FILE="${LOGIN_FILE:-$HOME/.profile}"      # none existed; create .profile
+
+if grep -q '\.bashrc' "$LOGIN_FILE" 2>/dev/null; then
+  echo "  yes, $(basename "$LOGIN_FILE") already sources it"
 else
-  cat >> "$PROFILE" <<'PROFILE_EOF'
+  cat >> "$LOGIN_FILE" <<'PROFILE_EOF'
 
 # --- robot tools: make login shells read ~/.bashrc ---
 if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
   . "$HOME/.bashrc"
 fi
 PROFILE_EOF
-  echo "  added it to ~/.profile"
+  echo "  added it to $(basename "$LOGIN_FILE")"
 fi
 
 echo "making roboshine importable ..."
