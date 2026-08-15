@@ -119,8 +119,9 @@ undervoltage/throttling warnings. `r` refreshes it.
 │   5  Point the camera (arrow keys)               │
 │   6  Read the line sensors                       │
 │   7  Camera stream on / off                      │
-│   8  Stop everything                             │
-│   9  Diagnostics                                 │
+│   8  Camera logs                                 │
+│   9  Stop everything                             │
+│  10  Diagnostics                                 │
 │   r  Refresh    q  Quit                          │
 ╰──────────────────────────────────────────────────╯
 ```
@@ -152,6 +153,14 @@ http://robot-1.local:8080/
 ```
 
 The dashboard shows a `cam` row: `off`, `on · idle`, or `live · 2 watching`.
+Menu item 8 shows the stream's log (`/tmp/robotcam.log`) and live viewer count —
+the first place to look when the picture won't appear.
+
+Item 7 also offers a **test pattern** instead of the camera: colour bars, a
+sweeping bar and a frame counter, generated in Python with no camera involved. If
+that appears in the browser, the network, HTTP path and browser are all fine and
+the camera is at fault. If it doesn't, the camera is innocent. It runs at a fixed
+5fps because it's drawn pixel by pixel.
 
 ### Why MJPEG rather than H.264 or WebRTC
 
@@ -192,7 +201,9 @@ python3 camstream.py --quality 55            # smaller frames, if supported
 `--quality` is opt-in because not every `rpicam-vid` build accepts it. The log at
 `/tmp/robotcam.log` will say if it doesn't.
 
-## Setting up a robot (instructor, once per card)
+## Manual setup, step by step
+
+What `setup-all.sh` does for you, if you'd rather run the pieces yourself.
 
 ```bash
 git clone https://github.com/sjaraza/test-robot-tools.git ~/test-robot-tools
@@ -233,105 +244,6 @@ and `rpicam-vid` exist, and the actual method names on the `Picarx` class.
 - Robots are addressed by mDNS name (`robot-3.local`), never by IP.
 - Arrow keys are decoded in both encodings, CSI (`ESC [ A`) and SS3 (`ESC O A`),
   since PuTTY, tmux and some Windows terminals send the latter.
-
-## Cloning one robot to nineteen
-
-`golden-card/` holds the tooling. The card is customised by **cloud-init**, whose
-inputs all live on the FAT boot partition — which is the only partition macOS can
-mount, so every per-card edit is doable from a Mac.
-
-### Once, on the golden robot
-
-```bash
-sudo bash ~/test-robot-tools/golden-card/prepare-golden.sh
-sudo shutdown -h now
-```
-
-Clears machine-id, SSH host keys, logs, shell history, and resets cloud-init so
-each clone runs its first boot properly.
-
-### Once, on the Mac
-
-```bash
-diskutil list
-diskutil unmountDisk /dev/diskN
-sudo dd if=/dev/rdiskN of=~/robot-golden.img bs=4m status=progress
-```
-
-Then flash `robot-golden.img` to each card with balenaEtcher.
-
-### Per card, before it ever boots
-
-```bash
-./golden-card/stamp-card.py --table 19     # check the mapping first
-./golden-card/stamp-card.py 7              # stamp the inserted card
-diskutil eject /Volumes/bootfs
-```
-
-That writes four things on the boot partition:
-
-| File | What changes |
-|---|---|
-| `user-data` | `hostname: robot-7` |
-| `meta-data` | `instance-id: robot-7` |
-| `cmdline.txt` | `ds=nocloud;i=robot-7` |
-| `network-config` | `macaddress:` under `wlan0` |
-
-**Why the instance-id matters:** cloud-init only re-runs its per-instance modules
-when the instance-id changes. Bumping it is what makes a clone apply its own
-hostname *and* regenerate SSH host keys, instead of deciding it has already been
-set up. It is set in two places because cloud-init seeds from `cmdline` before
-`meta-data`.
-
-`cmdline.txt` must stay a single line with no trailing newline; the script
-preserves that.
-
-### MAC scheme
-
-robot-1 is `aa:bb:cc:dd:ee:00`, so robot-N gets `N-1`:
-
-```
-robot-1   aa:bb:cc:dd:ee:00
-robot-7   aa:bb:cc:dd:ee:06
-robot-19  aa:bb:cc:dd:ee:18
-```
-
-The last octet is written as plain decimal digits used literally as hex, so
-robot-19 reads `:18` rather than `:12`. Run `--table 19` and eyeball it before
-stamping nineteen cards. `--base 1` shifts to robot-1 = `:01` if you'd rather.
-
-### Order matters
-
-Stamp each card **before** its first boot. A clone that boots unstamped comes up
-as a second `robot-1` with robot-1's MAC, which is exactly the mDNS and DHCP
-collision this avoids.
-
-### A note on how the MAC is set
-
-robot-1's MAC was originally set with:
-
-```bash
-sudo nmcli connection modify "netplan-wlan0-ShineLabs" wifi.cloned-mac-address AA:BB:CC:DD:EE:00
-```
-
-That works, but NetworkManager stores it on the **root filesystem**, which macOS
-can't mount and which clones verbatim — so every clone would wear robot-1's MAC,
-and the leftover setting would override the `macaddress:` in `network-config`.
-
-`prepare-golden.sh` therefore clears `cloned-mac-address` from all NM connections
-and removes any `90-NM-*.yaml` netplan write-back holding a MAC. After that the
-boot partition's `network-config` is the single place the MAC is defined, which is
-the only place per-card stamping can reach.
-
-⚠️ Verify this on the first clone before doing the rest:
-
-```bash
-cat /sys/class/net/wlan0/address
-```
-
-If it still shows robot-1's MAC, netplan's `macaddress:` isn't being honoured for
-wifi under the NetworkManager renderer, and the fallback is a `runcmd:` in
-`user-data` running the same `nmcli` command with the per-card value.
 
 ## Installing the PiCar-X software on a fresh robot
 
