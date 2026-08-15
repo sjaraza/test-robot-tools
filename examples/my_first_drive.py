@@ -18,22 +18,27 @@ print(f"There is {space} cm in front of me.")
 
 if space < 0:
     print("Nothing close enough to measure -- plenty of room.")
-    robot.drive('f', 20, seconds=2)
+    robot.driveForward(20, seconds=2)
 
 elif space < 20:
     print("Something is close. Backing up instead.")
-    robot.drive('b', 20, seconds=1)
+    robot.driveBack(20, seconds=1)
 
 else:
     print("Room to move. Driving forward, then curving left.")
-    robot.drive('f', 20, seconds=2)
-    robot.drive('l', 20, seconds=1)
+    robot.driveForward(20, seconds=2)
+
+    # Steering and driving are separate commands, so a curve is two steps:
+    # point the wheels, then drive. driveForward leaves the steering alone.
+    robot.steerLeft(20)
+    robot.driveForward(20, seconds=1)
+    robot.steerStraight()
 
 robot.stop()
 print("Done.")
 
 # Things to try:
 #   * change the speeds and the seconds
-#   * curve right with 'r' instead of 'l'
+#   * curve the other way with steerRight(20)
+#   * a gentler curve: steerLeft(10) instead of steerLeft(20)
 #   * loop: keep driving forward while get_distance_cm() stays above 30
-#   * use robot.steer(-20) to point the wheels without driving

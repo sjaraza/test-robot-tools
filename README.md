@@ -305,17 +305,24 @@ A small Python library on the robot, importable from any directory:
 ```python
 import roboshine as robot
 
-robot.drive('f', 20, seconds=2)     # forward at 20, then stop
+robot.driveForward(20, seconds=2)     # forward at 20, then stop itself
+
+robot.steerLeft(20)                   # point the wheels
+robot.driveForward(20, seconds=1)     # ...and curve
+
+robot.steerStraight()
 print(robot.get_distance_cm())
-robot.drive('l', 20, seconds=1)     # curve left
 robot.stop()
 ```
 
 | Command | What it does |
 |---|---|
-| `drive(direction, speed=10, seconds=None)` | `'f'` `'b'` `'l'` `'r'`. With `seconds`, stops itself |
-| `stop()` | stop the motors, straighten the wheels |
-| `steer(angle)` | point the wheels without driving, −30 to 30 |
+| `driveForward(speed=10, seconds=None)` | forward. With `seconds`, stops itself |
+| `driveBack(speed=10, seconds=None)` | backward, same arguments |
+| `stop()` | stop the motors; wheels stay pointed where they were |
+| `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
+| `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
+| `steerStraight()` | point them straight ahead |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
 | `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
@@ -325,8 +332,10 @@ python3 -c "import roboshine; roboshine.showHelp()"
 python3 ~/test-robot-tools/examples/my_first_drive.py
 ```
 
-`'l'` and `'r'` steer and drive forward — this robot steers like a car, so it
-can't spin on the spot.
+**Steering and driving are separate commands.** A curve is two steps: point the
+wheels, then drive. `driveForward()` deliberately leaves the steering alone — if
+it straightened the wheels, `steerLeft()` would be silently undone. This chassis
+steers like a car, so it can't spin on the spot.
 
 Three deliberate choices:
 
@@ -335,8 +344,9 @@ Three deliberate choices:
   robots end up under the furniture.
 - **The hardware opens on first use, not on import.** So `showHelp()` works with
   no robot attached, and a loose servo cable can't make `import roboshine` fail.
-- **Arguments are checked before anything moves.** A typo tells you it's a typo,
-  and a bad `seconds` is caught before the wheels turn.
+- **Arguments are checked before anything moves.** A typo tells you it's a typo
+  rather than complaining about a library, and a bad `seconds` is caught before
+  the wheels turn.
 
 `install.sh` makes it importable by writing a `.pth` file into your
 site-packages that points at this repo — so `update` keeps the library current

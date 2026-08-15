@@ -4,14 +4,18 @@ Runs on the robot. Put this at the top of your script:
 
     import roboshine as robot
 
-    robot.drive('f', 20, seconds=2)
-    print(robot.get_distance_cm())
+    robot.steerLeft(20)
+    robot.driveForward(20, seconds=2)
+    robot.steerStraight()
     robot.stop()
 
 Type robot.showHelp() to see everything available.
 
 Notes for anyone reading the code rather than using it:
 
+* Driving and steering are separate on purpose. driveForward() does not touch
+  the steering, so steerLeft() then driveForward() curves left -- if driving
+  straightened the wheels, the steer command would silently be undone.
 * The hardware is opened lazily, on the first command that needs it. So
   showHelp() works on a machine with no robot attached, and importing this
   module can't fail because a servo is unplugged.
@@ -23,10 +27,12 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.1"
+__version__ = "0.2"
 
 __all__ = [
-    "drive", "stop", "steer", "get_distance_cm", "wait", "showHelp",
+    "driveForward", "driveBack", "stop",
+    "steerLeft", "steerRight", "steerStraight",
+    "get_distance_cm", "wait", "showHelp",
 ]
 
 # picarx steering limit, degrees either side of straight.
@@ -37,12 +43,6 @@ MAX_STEER = 30
 # which reads as wildly wrong distances rather than as noise.
 PING_SPACING = 0.06
 PING_SAMPLES = 3
-
-# 'f' is what students will type; the long names are here so that both work.
-FORWARD = ("f", "fwd", "forward")
-BACKWARD = ("b", "back", "backward", "backwards", "reverse")
-LEFT = ("l", "left")
-RIGHT = ("r", "right")
 
 _car = None
 
@@ -96,94 +96,97 @@ def _stop_on_exit():
 atexit.register(_stop_on_exit)
 
 
-def _check_speed(speed):
-    if not isinstance(speed, (int, float)):
-        raise TypeError(f"speed should be a number, not {type(speed).__name__}")
-    if not 0 <= speed <= 100:
-        raise ValueError(f"speed should be between 0 and 100, not {speed}")
-    return int(speed)
+def _check_number(value, name, low, high):
+    """Validate before any hardware is touched.
 
-
-def drive(direction, speed=10, seconds=None):
-    """Drive the robot.
-
-        drive('f')                  forward at the default gentle speed
-        drive('b', 30)              backward, a bit quicker
-        drive('l', 20, seconds=2)   curve left for two seconds, then stop
-        drive('r', 20)              curve right, keeps going until you stop()
-
-    direction : 'f' forward, 'b' backward, 'l' left, 'r' right
-    speed     : 0 to 100. Starts at 10, which is slow enough to watch.
-    seconds   : optional. If given, the robot stops itself afterwards.
-
-    'l' and 'r' turn the front wheels and drive forward -- this robot steers
-    like a car, so it can't spin on the spot.
+    Two reasons for checking first: a typo should say what the typo was rather
+    than complaining about a library, and a bad number shouldn't be discovered
+    after the robot has already started moving.
     """
-    # Check everything the student passed in BEFORE touching the hardware.
-    # Two reasons: a typo should say what the typo was rather than complaining
-    # about a library, and a bad `seconds` shouldn't be discovered after the
-    # robot has already started moving.
-    speed = _check_speed(speed)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} should be a number, not {type(value).__name__}")
+    if not low <= value <= high:
+        raise ValueError(f"{name} should be between {low} and {high}, not {value}")
+    return value
 
-    if not isinstance(direction, str):
-        raise TypeError("direction should be a string like 'f' or 'forward'")
 
-    key = direction.strip().lower()
-    if key not in FORWARD + BACKWARD + LEFT + RIGHT:
-        raise ValueError(
-            f"'{direction}' isn't a direction I know.\n"
-            "Use 'f' forward, 'b' backward, 'l' left, or 'r' right."
-        )
-
-    if seconds is not None and (not isinstance(seconds, (int, float))
-                                or isinstance(seconds, bool) or seconds < 0):
-        raise ValueError(f"seconds should be a positive number, not {seconds!r}")
+def _run(backward, speed, seconds):
+    """Shared body of driveForward and driveBack."""
+    speed = int(_check_number(speed, "speed", 0, 100))
+    if seconds is not None:
+        _check_number(seconds, "seconds", 0, 3600)
 
     car = _hardware()
-
-    if key in FORWARD:
-        car.set_dir_servo_angle(0)
-        car.forward(speed)
-    elif key in BACKWARD:
-        car.set_dir_servo_angle(0)
-        car.backward(speed)
-    elif key in LEFT:
-        car.set_dir_servo_angle(-MAX_STEER)
-        car.forward(speed)
-    else:                                   # RIGHT, the only case left
-        car.set_dir_servo_angle(MAX_STEER)
-        car.forward(speed)
+    # Deliberately does not touch the steering: whatever steerLeft/steerRight
+    # last set stays set, so the two commands compose.
+    car.backward(speed) if backward else car.forward(speed)
 
     if seconds is not None:
         try:
             time.sleep(seconds)
         finally:
-            # Stop even if the student interrupts the wait with Ctrl-C.
-            stop()
+            stop()          # stop even if Ctrl-C interrupts the wait
+
+
+def driveForward(speed=10, seconds=None):
+    """Drive forwards.
+
+        driveForward()              gently, and keep going
+        driveForward(30)            quicker
+        driveForward(20, seconds=2) for two seconds, then stop by itself
+
+    speed   : 0 to 100. Starts at 10, slow enough to watch.
+    seconds : optional. If given, the robot stops itself afterwards.
+
+    The front wheels are left wherever you last pointed them, so this curves if
+    you have steered.
+    """
+    _run(False, speed, seconds)
+
+
+def driveBack(speed=10, seconds=None):
+    """Drive backwards. Same arguments as driveForward().
+
+        driveBack(20, seconds=1)
+    """
+    _run(True, speed, seconds)
 
 
 def stop():
-    """Stop the motors and straighten the front wheels."""
-    car = _hardware()
-    car.stop()
-    car.set_dir_servo_angle(0)
+    """Stop the motors.
 
-
-def steer(angle):
-    """Point the front wheels without driving.
-
-        steer(-20)   turn them left
-        steer(0)     straighten up
-        steer(15)    turn them right
-
-    angle : -30 (full left) to 30 (full right).
+    The front wheels stay where they are -- use steerStraight() to centre them.
     """
-    if not isinstance(angle, (int, float)):
-        raise TypeError(f"angle should be a number, not {type(angle).__name__}")
-    if not -MAX_STEER <= angle <= MAX_STEER:
-        raise ValueError(
-            f"angle should be between {-MAX_STEER} and {MAX_STEER}, not {angle}")
-    _hardware().set_dir_servo_angle(int(angle))
+    _hardware().stop()
+
+
+def steerLeft(degrees=MAX_STEER):
+    """Point the front wheels left. Doesn't drive.
+
+        steerLeft()      full left
+        steerLeft(15)    half left
+
+    degrees : 0 to 30, how far to turn. 30 is as far as the wheels go.
+    """
+    _check_number(degrees, "degrees", 0, MAX_STEER)
+    _hardware().set_dir_servo_angle(-int(degrees))
+
+
+def steerRight(degrees=MAX_STEER):
+    """Point the front wheels right. Doesn't drive.
+
+        steerRight()     full right
+        steerRight(15)   half right
+
+    degrees : 0 to 30, how far to turn. 30 is as far as the wheels go.
+    """
+    _check_number(degrees, "degrees", 0, MAX_STEER)
+    _hardware().set_dir_servo_angle(int(degrees))
+
+
+def steerStraight():
+    """Point the front wheels straight ahead."""
+    _hardware().set_dir_servo_angle(0)
 
 
 def get_distance_cm(samples=PING_SAMPLES):
@@ -227,12 +230,11 @@ def get_distance_cm(samples=PING_SAMPLES):
 def wait(seconds):
     """Do nothing for a while. The robot keeps doing whatever it was doing.
 
-        drive('f', 20)
+        driveForward(20)
         wait(1.5)
         stop()
     """
-    if not isinstance(seconds, (int, float)) or seconds < 0:
-        raise ValueError(f"seconds should be a positive number, not {seconds}")
+    _check_number(seconds, "seconds", 0, 3600)
     time.sleep(seconds)
 
 
@@ -241,39 +243,46 @@ def showHelp():
     print(f"""
 roboshine {__version__} -- robot commands you can use in your own scripts
 
-  drive(direction, speed=10, seconds=None)
-      Drive the robot.
-        drive('f')                 forward, gently
-        drive('b', 30)             backward at speed 30
-        drive('l', 20, seconds=2)  curve left for 2 seconds, then stop
-      direction : 'f' forward, 'b' backward, 'l' left, 'r' right
-      speed     : 0 to 100
-      seconds   : optional; the robot stops itself when the time is up
+  DRIVING
+    driveForward(speed=10, seconds=None)
+    driveBack(speed=10, seconds=None)
+        speed   : 0 to 100
+        seconds : optional; the robot stops itself when the time is up
+        Examples:
+          driveForward()               gently, keeps going
+          driveForward(30)             quicker
+          driveBack(20, seconds=1)     backwards for one second
 
-  stop()
-      Stop the motors and straighten the wheels.
+    stop()
+        Stop the motors. The wheels stay pointed where they were.
 
-  steer(angle)
-      Point the front wheels without driving. -30 is full left, 30 full right.
+  STEERING
+    steerLeft(degrees=30)     point the front wheels left
+    steerRight(degrees=30)    point the front wheels right
+    steerStraight()           point them straight ahead
+        degrees : 0 to 30. Steering does not drive; combine the two.
 
-  get_distance_cm()
-      How far away the thing in front is, in centimetres.
-      Returns -1 if nothing is close enough to detect.
+  SENSING
+    get_distance_cm()
+        Centimetres to the thing in front. -1 means nothing is in range.
 
-  wait(seconds)
-      Pause your script. The robot carries on doing what it was doing.
-
-  showHelp()
-      Print this.
+  OTHER
+    wait(seconds)     pause your script; the robot carries on
+    showHelp()        print this
 
 A whole script looks like this:
 
   import roboshine as robot
 
-  robot.drive('f', 20, seconds=1)
+  robot.steerLeft(20)
+  robot.driveForward(20, seconds=2)     # curves left for 2 seconds
+
+  robot.steerStraight()
   if robot.get_distance_cm() < 20:
-      robot.drive('b', 20, seconds=1)
+      robot.driveBack(20, seconds=1)
+
   robot.stop()
 
-The motors always stop when your script finishes, even if it crashes.
+Steering and driving are separate, so driveForward() keeps whatever steering you
+set. The motors always stop when your script finishes, even if it crashes.
 """)
