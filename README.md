@@ -305,20 +305,23 @@ A small Python library on the robot, importable from any directory:
 ```python
 import roboshine as robot
 
-robot.driveForward(20, seconds=2)     # forward at 20, then stop itself
+robot.steerLeft(20)          # point the wheels
+robot.driveForward(20)       # start moving, curving left
+robot.wait(2)                # ...for two seconds
+robot.stop()
 
-robot.steerLeft(20)                   # point the wheels
-robot.driveForward(20, seconds=1)     # ...and curve
-
+# Nothing blocks except wait(), so you can watch a sensor while driving:
 robot.steerStraight()
-print(robot.get_distance_cm())
+robot.driveForward(15)
+while robot.get_distance_cm() > 25:
+    robot.wait(0.1)
 robot.stop()
 ```
 
 | Command | What it does |
 |---|---|
-| `driveForward(speed=10, seconds=None)` | forward. With `seconds`, stops itself |
-| `driveBack(speed=10, seconds=None)` | backward, same arguments |
+| `driveForward(speed=10)` | start driving forward; keeps going until `stop()` |
+| `driveBack(speed=10)` | start driving backward; keeps going until `stop()` |
 | `stop()` | stop the motors; wheels stay pointed where they were |
 | `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
 | `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
@@ -337,7 +340,12 @@ wheels, then drive. `driveForward()` deliberately leaves the steering alone — 
 it straightened the wheels, `steerLeft()` would be silently undone. This chassis
 steers like a car, so it can't spin on the spot.
 
-Three deliberate choices:
+**Nothing blocks except `wait()`.** `driveForward()` sets the motors going and
+returns immediately, so the robot keeps driving until `stop()` — which is what
+lets a script watch a sensor while moving. Keeping the pauses in one obvious
+command is easier to reason about than commands that sometimes take time.
+
+Three more deliberate choices:
 
 - **The motors stop when your script ends**, however it ends — normally, on a
   crash, or on Ctrl-C. A script exiting with the robot still driving is how

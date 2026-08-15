@@ -5,8 +5,8 @@ Runs on the robot. Put this at the top of your script:
     import roboshine as robot
 
     robot.steerLeft(20)
-    robot.driveForward(20, seconds=2)
-    robot.steerStraight()
+    robot.driveForward(20)
+    robot.wait(2)
     robot.stop()
 
 Type robot.showHelp() to see everything available.
@@ -16,6 +16,10 @@ Notes for anyone reading the code rather than using it:
 * Driving and steering are separate on purpose. driveForward() does not touch
   the steering, so steerLeft() then driveForward() curves left -- if driving
   straightened the wheels, the steer command would silently be undone.
+* Every command returns immediately. driveForward() sets the motors going and
+  hands control straight back, so the robot keeps driving until stop() is
+  called. That means a script can watch a sensor while moving. wait() is the
+  only command that pauses, which keeps it obvious where the pauses are.
 * The hardware is opened lazily, on the first command that needs it. So
   showHelp() works on a machine with no robot attached, and importing this
   module can't fail because a servo is unplugged.
@@ -27,7 +31,7 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.2"
+__version__ = "0.3"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
@@ -110,46 +114,45 @@ def _check_number(value, name, low, high):
     return value
 
 
-def _run(backward, speed, seconds):
+def _run(backward, speed):
     """Shared body of driveForward and driveBack."""
     speed = int(_check_number(speed, "speed", 0, 100))
-    if seconds is not None:
-        _check_number(seconds, "seconds", 0, 3600)
-
     car = _hardware()
     # Deliberately does not touch the steering: whatever steerLeft/steerRight
     # last set stays set, so the two commands compose.
     car.backward(speed) if backward else car.forward(speed)
 
-    if seconds is not None:
-        try:
-            time.sleep(seconds)
-        finally:
-            stop()          # stop even if Ctrl-C interrupts the wait
 
+def driveForward(speed=10):
+    """Start driving forwards, and keep going until stop() is called.
 
-def driveForward(speed=10, seconds=None):
-    """Drive forwards.
+        driveForward()      gently
+        driveForward(30)    quicker
 
-        driveForward()              gently, and keep going
-        driveForward(30)            quicker
-        driveForward(20, seconds=2) for two seconds, then stop by itself
+    speed : 0 to 100. Starts at 10, slow enough to watch.
 
-    speed   : 0 to 100. Starts at 10, slow enough to watch.
-    seconds : optional. If given, the robot stops itself afterwards.
+    Returns straight away -- the robot carries on while your script does other
+    things, so you can watch a sensor while moving:
 
-    The front wheels are left wherever you last pointed them, so this curves if
-    you have steered.
+        driveForward(20)
+        while get_distance_cm() > 20:
+            wait(0.1)
+        stop()
+
+    The front wheels stay wherever you last pointed them, so this curves if you
+    have steered.
     """
-    _run(False, speed, seconds)
+    _run(False, speed)
 
 
-def driveBack(speed=10, seconds=None):
-    """Drive backwards. Same arguments as driveForward().
+def driveBack(speed=10):
+    """Start driving backwards, and keep going until stop() is called.
 
-        driveBack(20, seconds=1)
+        driveBack(20)
+        wait(1)
+        stop()
     """
-    _run(True, speed, seconds)
+    _run(True, speed)
 
 
 def stop():
@@ -244,14 +247,14 @@ def showHelp():
 roboshine {__version__} -- robot commands you can use in your own scripts
 
   DRIVING
-    driveForward(speed=10, seconds=None)
-    driveBack(speed=10, seconds=None)
-        speed   : 0 to 100
-        seconds : optional; the robot stops itself when the time is up
+    driveForward(speed=10)
+    driveBack(speed=10)
+        speed : 0 to 100
+        These start the motors and return immediately. The robot keeps going
+        until you call stop().
         Examples:
-          driveForward()               gently, keeps going
-          driveForward(30)             quicker
-          driveBack(20, seconds=1)     backwards for one second
+          driveForward()      gently
+          driveForward(30)    quicker
 
     stop()
         Stop the motors. The wheels stay pointed where they were.
@@ -275,14 +278,17 @@ A whole script looks like this:
   import roboshine as robot
 
   robot.steerLeft(20)
-  robot.driveForward(20, seconds=2)     # curves left for 2 seconds
-
-  robot.steerStraight()
-  if robot.get_distance_cm() < 20:
-      robot.driveBack(20, seconds=1)
-
+  robot.driveForward(20)     # starts moving, curving left
+  robot.wait(2)              # ...for two seconds
   robot.stop()
 
-Steering and driving are separate, so driveForward() keeps whatever steering you
-set. The motors always stop when your script finishes, even if it crashes.
+  robot.steerStraight()
+  robot.driveForward(20)
+  while robot.get_distance_cm() > 20:    # drive until something is close
+      robot.wait(0.1)
+  robot.stop()
+
+Driving and steering are separate, so driveForward() keeps whatever steering you
+set. Commands return immediately; wait() is the only one that pauses. The motors
+always stop when your script finishes, even if it crashes.
 """)
