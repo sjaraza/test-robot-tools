@@ -283,8 +283,9 @@ and `rpicam-vid` exist, and the actual method names on the `Picarx` class.
 
 - Standard library only. No pip installs on the robot beyond the PiCar-X
   software that's already there.
-- The block-letter font covers `ROBOT` and digits. Any other hostname falls back
-  to plain text rather than a half-rendered banner.
+- The block-letter font covers A–Z, 0–9 and `-`, so `robot-A` and `robot-12` both
+  render. A hostname with anything else falls back to plain text rather than a
+  half-rendered banner.
 - Robots are addressed by mDNS name (`robot-3.local`), never by IP.
 - Arrow keys are decoded in both encodings, CSI (`ESC [ A`) and SS3 (`ESC O A`),
   since PuTTY, tmux and some Windows terminals send the latter.
