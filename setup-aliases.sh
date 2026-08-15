@@ -10,6 +10,7 @@
 #   sb           re-read ~/.bashrc after editing it
 #   eb           edit ~/.bashrc in vi
 #   robotreboot  reboot the robot
+#   robotoff     shut the robot down properly before unplugging it
 #
 # Safe to re-run. It rewrites its own managed block rather than appending, so
 # repeated runs can't pile up duplicates, and it clears out the older `launch`
@@ -43,7 +44,7 @@ awk -v b="$BEGIN" -v e="$END" '
   $0 == b { inblock = 1; next }
   $0 == e { inblock = 0; next }
   inblock { next }
-  /^alias (cockpit|robostat|update|launch|sb|eb|robotreboot)=/ { next }
+  /^alias (cockpit|robostat|update|launch|sb|eb|robotreboot|robotoff)=/ { next }
   /^# --- robot tools ---$/ { next }
   /^# --- robostat ---$/ { next }
   { print }
@@ -60,6 +61,7 @@ awk -v b="$BEGIN" -v e="$END" '
   echo "alias sb='source ~/.bashrc'"
   echo "alias eb='vi ~/.bashrc'"
   echo "alias robotreboot='sudo systemctl reboot'"
+  echo "alias robotoff='sudo systemctl poweroff'"
   echo "$END"
 } > "$BASHRC"
 
@@ -70,4 +72,4 @@ echo "Run this once to use them in the current session:"
 echo
 echo "    source ~/.bashrc"
 echo
-echo "Then:  cockpit   robostat   update   sb   eb   robotreboot"
+echo "Then:  cockpit  robostat  update  sb  eb  robotreboot  robotoff"

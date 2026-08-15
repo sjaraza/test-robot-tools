@@ -12,8 +12,9 @@
 # It runs, in order:
 #   1. clone or update this repo
 #   2. setup-picarx.sh   -- robot-hat, vilib, picar-x  (the slow part)
-#   3. install.sh        -- the login splash screen
-#   4. setup-aliases.sh  -- the cockpit / robostat / update aliases
+#   3. setup-mosh.sh     -- mosh, if it isn't there yet
+#   4. install.sh        -- the login splash, and roboshine's import path
+#   5. setup-aliases.sh  -- cockpit / robostat / update / sb / eb / robotreboot
 #
 # Options are passed through to setup-picarx.sh:
 #   --skip-libs       the PiCar-X software is already installed, skip step 2
@@ -77,12 +78,23 @@ else
     || die "PiCar-X install failed -- see ~/picarx-install.log"
 fi
 
-# --- 3. splash screen ------------------------------------------------------
-say "3. Login splash screen"
+# --- 3. mosh ---------------------------------------------------------------
+# Its own step rather than part of setup-picarx.sh's package list: that whole
+# step is skipped once the libraries import, so a robot set up before mosh
+# existed would never have got it.
+say "3. mosh"
+if command -v mosh-server >/dev/null; then
+  ok "already installed"
+else
+  bash "$REPO_DIR/setup-mosh.sh" || echo "  ${YELLOW}!${OFF}   mosh setup had trouble; carrying on"
+fi
+
+# --- 4. splash screen ------------------------------------------------------
+say "4. Login splash screen"
 bash "$REPO_DIR/install.sh" || die "install.sh failed"
 
-# --- 4. aliases ------------------------------------------------------------
-say "4. Aliases"
+# --- 5. aliases ------------------------------------------------------------
+say "5. Aliases"
 bash "$REPO_DIR/setup-aliases.sh" || die "setup-aliases.sh failed"
 
 # ---------------------------------------------------------------------------
@@ -97,3 +109,7 @@ echo "After that you can type:"
 echo "    ${BOLD}cockpit${OFF}     drive the robot"
 echo "    ${BOLD}robostat${OFF}    battery, temperature, WiFi"
 echo "    ${BOLD}update${OFF}      get the latest version of these tools"
+echo "    ${BOLD}robotoff${OFF}    shut down properly before unplugging"
+echo
+echo "Optional, needs the speaker working:"
+echo "    bash $REPO_DIR/setup-announce.sh    say name and IP at every boot"

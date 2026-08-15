@@ -47,6 +47,8 @@ Wait a minute, then `ssh robot@robot-1.local` again. You should see a big
 | `update` | Get the latest version of these tools |
 | `sb` | Re-read `~/.bashrc` after editing it |
 | `eb` | Edit `~/.bashrc` in `vi` |
+| `robotreboot` | Reboot the robot |
+| `robotoff` | Shut it down properly — do this before unplugging |
 
 If something looks wrong, run `python3 ~/test-robot-tools/robotmenu.py --probe`
 and show the output to your instructor.
@@ -371,6 +373,12 @@ with contrib, mosh, mDNS).
 CV runs there rather than here on purpose: a Zero 2 W has four slow cores and
 512MB, so the robot captures and hardware-encodes while the laptop does the
 thinking. The cockpit prints the exact command when you start the stream.
+
+### Always use `robotoff` before unplugging
+
+Pulling the power while Linux is still writing is the main way SD cards die, and
+a corrupt card means re-imaging. `robotoff` shuts down cleanly; wait for the green
+LED to stop flickering before you disconnect.
 
 ## Announcing itself on boot
 
