@@ -47,10 +47,9 @@ fi
 # install would have required after every pull.
 # An SSH login runs bash as a *login* shell, which does NOT read ~/.bashrc. It
 # reads the FIRST of ~/.bash_profile, ~/.bash_login, ~/.profile that exists and
-# ignores the others. Debian's default ~/.profile sources ~/.bashrc, which is why
-# this usually works -- but if a ~/.bash_profile exists it wins, ~/.profile is
-# never read, and no aliases load. Target whichever file bash will actually use.
-echo "checking login shells read ~/.bashrc ..."
+# ignores the others -- so writing to ~/.profile does nothing on a robot that has
+# a ~/.bash_profile. Find the file bash will actually use.
+echo "setting up the login greeting ..."
 LOGIN_FILE=""
 for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
   if [[ -f "$candidate" ]]; then
@@ -59,18 +58,48 @@ for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
   fi
 done
 LOGIN_FILE="${LOGIN_FILE:-$HOME/.profile}"      # none existed; create .profile
+touch "$LOGIN_FILE"
 
-if grep -q '\.bashrc' "$LOGIN_FILE" 2>/dev/null; then
-  echo "  yes, $(basename "$LOGIN_FILE") already sources it"
+LOGIN_BEGIN="# --- robot tools login (managed by install.sh) ---"
+LOGIN_END="# --- end robot tools login ---"
+
+# A managed block, rewritten each time, so additions reach robots that already
+# ran an older version of this script. The earlier ad-hoc version had no markers,
+# so strip that shape too.
+LOGIN_TMP="$(mktemp)"
+LOGIN_NEW="$(mktemp)"
+trap 'rm -f "$LOGIN_TMP" "$LOGIN_NEW" "${NEW_MOTD:-}"' EXIT
+
+awk -v b="$LOGIN_BEGIN" -v e="$LOGIN_END" '
+  $0 == b { inblock = 1; next }
+  $0 == e { inblock = 0; next }
+  inblock { next }
+  # the older, marker-less block: a comment plus three lines
+  /^# --- robot tools: make login shells read ~\/\.bashrc ---$/ { skip = 3; next }
+  skip > 0 { skip--; next }
+  { print }
+' "$LOGIN_FILE" > "$LOGIN_TMP"
+
+{
+  cat "$LOGIN_TMP"
+  echo
+  echo "$LOGIN_BEGIN"
+  echo 'if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then'
+  echo '  . "$HOME/.bashrc"'
+  echo 'fi'
+  echo '# Show the robot vitals on login. Interactive shells only: printing here'
+  echo '# during an scp or sftp transfer would corrupt it.'
+  echo 'case $- in'
+  echo "  *i*) [ -f \"$REPO_DIR/robostat.py\" ] && python3 \"$REPO_DIR/robostat.py\" 2>/dev/null ;;"
+  echo 'esac'
+  echo "$LOGIN_END"
+} > "$LOGIN_NEW"
+
+if cmp -s "$LOGIN_NEW" "$LOGIN_FILE"; then
+  echo "  $(basename "$LOGIN_FILE") already set up"
 else
-  cat >> "$LOGIN_FILE" <<'PROFILE_EOF'
-
-# --- robot tools: make login shells read ~/.bashrc ---
-if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
-  . "$HOME/.bashrc"
-fi
-PROFILE_EOF
-  echo "  added it to $(basename "$LOGIN_FILE")"
+  cat "$LOGIN_NEW" > "$LOGIN_FILE"
+  echo "  $(basename "$LOGIN_FILE") sources ~/.bashrc and shows robostat at login"
 fi
 
 echo "making roboshine importable ..."
