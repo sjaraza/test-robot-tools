@@ -41,6 +41,24 @@ if [[ ! -w /opt/picar-x ]]; then
   sudo chown -R "$USER":"$USER" /opt/picar-x
 fi
 
+# Make `import roboshine` work from any directory, without installing anything.
+# A .pth file in the user's site-packages just adds this repo to Python's path,
+# so `update` keeps the library current with no reinstall step -- which pip
+# install would have required after every pull.
+echo "making roboshine importable ..."
+SITE="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
+if [[ -n "$SITE" ]]; then
+  mkdir -p "$SITE"
+  echo "$REPO_DIR" > "$SITE/roboshine.pth"
+  if python3 -c "import roboshine" 2>/dev/null; then
+    echo "  import roboshine works from anywhere"
+  else
+    echo "  WARNING: wrote $SITE/roboshine.pth but the import still fails" >&2
+  fi
+else
+  echo "  WARNING: couldn't find your site-packages; roboshine won't import" >&2
+fi
+
 # The splash is generated rather than hardcoded, so each robot shows its own
 # hostname and there's only one copy of the block-letter font. --color is
 # required here: stdout is a pipe into tee, not a terminal, so colour would
