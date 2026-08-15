@@ -7,6 +7,8 @@
 #   cockpit    take the controls (dashboard + menu)
 #   robostat   print the robot's stats
 #   update     pull the latest code from GitHub
+#   sb         re-read ~/.bashrc after editing it
+#   eb         edit ~/.bashrc in vi
 #
 # Safe to re-run. It rewrites its own managed block rather than appending, so
 # repeated runs can't pile up duplicates, and it clears out the older `launch`
@@ -40,7 +42,7 @@ awk -v b="$BEGIN" -v e="$END" '
   $0 == b { inblock = 1; next }
   $0 == e { inblock = 0; next }
   inblock { next }
-  /^alias (cockpit|robostat|update|launch)=/ { next }
+  /^alias (cockpit|robostat|update|launch|sb|eb)=/ { next }
   /^# --- robot tools ---$/ { next }
   /^# --- robostat ---$/ { next }
   { print }
@@ -54,6 +56,8 @@ awk -v b="$BEGIN" -v e="$END" '
   echo "alias cockpit='python3 $REPO_DIR/robotmenu.py'"
   echo "alias robostat='python3 $REPO_DIR/robostat.py'"
   echo "alias update='bash $REPO_DIR/update.sh'"
+  echo "alias sb='source ~/.bashrc'"
+  echo "alias eb='vi ~/.bashrc'"
   echo "$END"
 } > "$BASHRC"
 
@@ -64,4 +68,4 @@ echo "Run this once to use them in the current session:"
 echo
 echo "    source ~/.bashrc"
 echo
-echo "Then:  cockpit   robostat   update"
+echo "Then:  cockpit   robostat   update   sb   eb"

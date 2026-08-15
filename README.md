@@ -45,6 +45,8 @@ Wait a minute, then `ssh robot@robot-1.local` again. You should see a big
 | `cockpit` | Drive the robot, read its sensors, start the camera |
 | `robostat` | Battery, temperature, WiFi signal |
 | `update` | Get the latest version of these tools |
+| `sb` | Re-read `~/.bashrc` after editing it |
+| `eb` | Edit `~/.bashrc` in `vi` |
 
 If something looks wrong, run `python3 ~/test-robot-tools/robotmenu.py --probe`
 and show the output to your instructor.
