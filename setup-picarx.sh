@@ -7,6 +7,7 @@
 #
 # Options:
 #   --skip-upgrade    don't run 'apt upgrade' (much faster; the slowest step)
+#   --force           reinstall the libraries even if they already import
 #   --with-sound      also run robot-hat's i2samp.sh for the I2S amplifier
 #   --yes             don't ask for confirmation before starting
 #
@@ -23,10 +24,12 @@ LOG="$HOME/picarx-install.log"
 SKIP_UPGRADE=0
 WITH_SOUND=0
 ASSUME_YES=0
+FORCE=0
 
 for arg in "$@"; do
   case "$arg" in
     --skip-upgrade) SKIP_UPGRADE=1 ;;
+    --force)        FORCE=1 ;;
     --with-sound)   WITH_SOUND=1 ;;
     --yes|-y)       ASSUME_YES=1 ;;
     -h|--help)
@@ -57,6 +60,14 @@ die()  { echo "   ${RED}fail${OFF} $*"; echo; echo "See $LOG"; exit 1; }
 elapsed() {
   local total=$((SECONDS - STARTED))
   printf '%dm%02ds' $((total / 60)) $((total % 60))
+}
+
+# Already importable? Then the expensive install can be skipped. This matters:
+# vilib is the OpenCV step, so a failure there used to mean re-doing robot-hat
+# and the apt upgrade as well on the next attempt.
+installed() {
+  (( FORCE )) && return 1
+  python3 -c "import $1" 2>/dev/null
 }
 
 # Clone if absent, otherwise update. Returns 0 either way.
@@ -148,17 +159,27 @@ ok "git, pip, setuptools, smbus, python3-dev, i2c-tools, mosh"
 
 step "robot-hat"
 cd "$HOME" || die "no home directory?"
+# The checkout is still fetched even when we skip installing -- it's a cheap git
+# pull and i2samp.sh plus the examples live in it.
 fetch_repo https://github.com/sunfounder/robot-hat.git "$HOME/robot-hat" 2.5.x
-( cd "$HOME/robot-hat" && sudo python3 install.py ) || die "robot-hat install.py failed"
-ok "robot-hat installed"
+if installed robot_hat; then
+  ok "already installed, skipping (--force to reinstall)"
+else
+  ( cd "$HOME/robot-hat" && sudo python3 install.py ) || die "robot-hat install.py failed"
+  ok "robot-hat installed"
+fi
 
 # ---------------------------------------------------------------------------
 
 step "vilib  (pulls in OpenCV, the longest step)"
 cd "$HOME" || exit 1
 fetch_repo https://github.com/sunfounder/vilib.git "$HOME/vilib"
-( cd "$HOME/vilib" && sudo python3 install.py ) || die "vilib install.py failed"
-ok "vilib installed"
+if installed vilib; then
+  ok "already installed, skipping (--force to reinstall)"
+else
+  ( cd "$HOME/vilib" && sudo python3 install.py ) || die "vilib install.py failed"
+  ok "vilib installed"
+fi
 
 # ---------------------------------------------------------------------------
 
@@ -167,15 +188,19 @@ cd "$HOME" || exit 1
 fetch_repo https://github.com/sunfounder/picar-x.git "$HOME/picar-x" 2.1.x
 cd "$HOME/picar-x" || exit 1
 
-# Debian trixie marks the system Python as externally managed (PEP 668), so pip
-# refuses to install into it without --break-system-packages. Older pip doesn't
-# know that flag, hence the fallback.
-if sudo pip3 install . --break-system-packages; then
-  ok "picar-x installed"
-elif sudo pip3 install .; then
-  ok "picar-x installed (pip without --break-system-packages)"
+if installed picarx; then
+  ok "already installed, skipping (--force to reinstall)"
 else
-  die "pip install of picar-x failed"
+  # Debian trixie marks the system Python as externally managed (PEP 668), so
+  # pip refuses to install into it without --break-system-packages. Older pip
+  # doesn't know that flag, hence the fallback.
+  if sudo pip3 install . --break-system-packages; then
+    ok "picar-x installed"
+  elif sudo pip3 install .; then
+    ok "picar-x installed (pip without --break-system-packages)"
+  else
+    die "pip install of picar-x failed"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

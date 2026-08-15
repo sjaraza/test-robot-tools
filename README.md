@@ -267,7 +267,15 @@ bash setup-picarx.sh --with-sound      # also run robot-hat's i2samp.sh
 bash setup-picarx.sh --yes             # no confirmation prompt
 ```
 
-Safe to re-run: existing checkouts are updated rather than re-cloned.
+Safe to re-run, and cheap to re-run: each library is skipped if it already
+imports, so a failure part-way through doesn't redo the parts that succeeded.
+That matters because vilib is the OpenCV step — a failure there used to mean
+rebuilding robot-hat and repeating the `apt upgrade` on the next attempt.
+Checkouts are still `git pull`ed rather than re-cloned, so the examples and
+`i2samp.sh` stay current. Use `--force` to reinstall regardless.
+
+`setup-all.sh` skips the whole step if `picarx`, `robot_hat` and `vilib` all
+import.
 
 Before it starts it checks sudo works, GitHub is reachable, there's enough disk
 space, and the clock is sane — a Zero 2 W has no battery-backed clock, and a
