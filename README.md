@@ -369,6 +369,9 @@ robot.stop()
 | `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
 | `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
 | `steerStraight()` | point them straight ahead |
+| `lookLeft(degrees=90)` / `lookRight(...)` | turn the camera, 0–90 |
+| `lookUp(degrees=65)` / `lookDown(degrees=35)` | tilt the camera |
+| `lookStraight()` | camera straight ahead and level |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
 | `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
@@ -382,6 +385,10 @@ python3 ~/test-robot-tools/examples/my_first_drive.py
 wheels, then drive. `driveForward()` deliberately leaves the steering alone — if
 it straightened the wheels, `steerLeft()` would be silently undone. This chassis
 steers like a car, so it can't spin on the spot.
+
+**The camera's two axes are separate too**, so `lookLeft(40)` then `lookUp(20)`
+leaves it pointing up *and* left. `lookStraight()` resets both. Tilt is
+asymmetric because the mount is: 65° up, 35° down.
 
 **Nothing blocks except `wait()`.** `driveForward()` sets the motors going and
 returns immediately, so the robot keeps driving until `stop()` — which is what

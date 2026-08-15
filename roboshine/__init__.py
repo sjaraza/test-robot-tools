@@ -13,6 +13,9 @@ Type robot.showHelp() to see everything available.
 
 Notes for anyone reading the code rather than using it:
 
+* Left/right and up/down are separate for the camera too, so lookLeft(40) then
+  lookUp(20) leaves the camera pointing up and to the left. lookStraight()
+  resets both.
 * Driving and steering are separate on purpose. driveForward() does not touch
   the steering, so steerLeft() then driveForward() curves left -- if driving
   straightened the wheels, the steer command would silently be undone.
@@ -31,16 +34,23 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.3"
+__version__ = "0.4"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
     "steerLeft", "steerRight", "steerStraight",
+    "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
     "get_distance_cm", "wait", "showHelp",
 ]
 
 # picarx steering limit, degrees either side of straight.
 MAX_STEER = 30
+
+# Camera limits. Tilt is deliberately asymmetric -- the mount can look further up
+# than down, and pretending otherwise would just make lookDown(60) fail oddly.
+MAX_PAN = 90
+MAX_TILT_UP = 65
+MAX_TILT_DOWN = 35
 
 # An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
 # and the echo from the previous ping arrives inside the next measurement window,
@@ -192,6 +202,43 @@ def steerStraight():
     _hardware().set_dir_servo_angle(0)
 
 
+def lookLeft(degrees=MAX_PAN):
+    """Turn the camera left. Doesn't move the robot.
+
+        lookLeft()       all the way left
+        lookLeft(30)     part way
+
+    degrees : 0 to 90.
+    """
+    _check_number(degrees, "degrees", 0, MAX_PAN)
+    _hardware().set_cam_pan_angle(-int(degrees))
+
+
+def lookRight(degrees=MAX_PAN):
+    """Turn the camera right. 0 to 90 degrees."""
+    _check_number(degrees, "degrees", 0, MAX_PAN)
+    _hardware().set_cam_pan_angle(int(degrees))
+
+
+def lookUp(degrees=MAX_TILT_UP):
+    """Tilt the camera up. 0 to 65 degrees."""
+    _check_number(degrees, "degrees", 0, MAX_TILT_UP)
+    _hardware().set_cam_tilt_angle(int(degrees))
+
+
+def lookDown(degrees=MAX_TILT_DOWN):
+    """Tilt the camera down. 0 to 35 degrees -- it can't look as far down as up."""
+    _check_number(degrees, "degrees", 0, MAX_TILT_DOWN)
+    _hardware().set_cam_tilt_angle(-int(degrees))
+
+
+def lookStraight():
+    """Point the camera straight ahead, level."""
+    car = _hardware()
+    car.set_cam_pan_angle(0)
+    car.set_cam_tilt_angle(0)
+
+
 def get_distance_cm(samples=PING_SAMPLES):
     """How far away is the thing in front? Distance in centimetres.
 
@@ -264,6 +311,16 @@ roboshine {__version__} -- robot commands you can use in your own scripts
     steerRight(degrees=30)    point the front wheels right
     steerStraight()           point them straight ahead
         degrees : 0 to 30. Steering does not drive; combine the two.
+
+  CAMERA
+    lookLeft(degrees=90)      turn the camera left
+    lookRight(degrees=90)     turn it right
+    lookUp(degrees=65)        tilt it up
+    lookDown(degrees=35)      tilt it down (it can't look as far down as up)
+    lookStraight()            straight ahead and level
+        Left/right and up/down are separate, so they combine:
+          lookLeft(40)
+          lookUp(20)          now pointing up and to the left
 
   SENSING
     get_distance_cm()

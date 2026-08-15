@@ -42,6 +42,13 @@ else:
     robot.stop()
     robot.steerStraight()
 
+# Point the camera around -- this doesn't move the robot at all.
+robot.lookLeft(40)
+robot.wait(1)
+robot.lookUp(20)          # now pointing up AND left; the two axes are separate
+robot.wait(1)
+robot.lookStraight()
+
 print("Done.")
 
 # Nothing blocks except wait(), so your script can watch while the robot moves:
