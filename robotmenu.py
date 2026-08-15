@@ -550,7 +550,12 @@ def clip(text, width):
         out.append(text[index])
         visible += 1
         index += 1
-    return "".join(out) + RESET
+    clipped = "".join(out)
+    # Only re-emit a reset if we actually cut through coloured text. Appending it
+    # unconditionally puts a literal escape into --no-color output.
+    if "\033" in clipped:
+        clipped += RESET
+    return clipped
 
 
 def pad(text, width):
