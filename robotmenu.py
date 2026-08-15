@@ -1147,6 +1147,17 @@ def stop_camera():
     return True
 
 
+def robot_number():
+    """The digits from this robot's hostname, for pasting into laptop commands.
+
+    Falls back to the whole hostname so the command we print is still usable on
+    a robot that isn't named robot-N.
+    """
+    host = socket.gethostname().split(".")[0]
+    digits = "".join(char for char in host if char.isdigit())
+    return digits or host
+
+
 def camera_stream():
     """Toggle the browser stream on or off."""
     running, status = camera_state()
@@ -1222,10 +1233,17 @@ def camera_stream():
     print()
     print("  " + paint("stream is live", GREEN, BOLD)
           + (paint("  (test pattern, not the camera)", YELLOW) if dummy else ""))
-    print("  open this on your laptop:")
+    print("  watch it in a browser:")
     print("  " + paint(camera_url(status), BOLD, CYAN))
     print()
-    print("  " + paint("The camera only encodes while a browser is watching,",
+    # The cockpit runs here on the robot, but computer vision runs on the
+    # student's laptop -- so the most useful thing we can do is hand them the
+    # exact command, with this robot's name already filled in.
+    print("  " + paint("to run computer vision, on YOUR LAPTOP:", GREY))
+    print("  " + paint(f"./laptop/cvclient.py {robot_number()}", BOLD, CYAN))
+    print("  " + paint("(needs: pip install opencv-python)", GREY))
+    print()
+    print("  " + paint("The camera only encodes while something is watching,",
                        GREY))
     print("  " + paint("and releases itself after 5 idle minutes.", GREY))
     return False
