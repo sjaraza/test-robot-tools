@@ -9,13 +9,15 @@
 #
 #   bash ~/test-robot-tools/setup-all.sh
 #
-# It runs, in order:
-#   1. clone or update this repo
-#   2. setup-picarx.sh   -- robot-hat, vilib, picar-x  (the slow part)
-#   3. update.sh         -- splash, roboshine path, aliases, mosh
+# Use it for a fresh robot AND for picking up changes later -- it works out
+# what's already there and only does the rest. On a robot that's fully set up it
+# finishes in seconds and installs nothing.
 #
-# Day to day you only need `update`. This script exists for the first run, when
-# the PiCar-X libraries still have to be installed.
+# It checks, in order:
+#   1. this repo                        clone, or pull
+#   2. robot-hat, vilib, picar-x        install only the ones missing
+#   3. splash, roboshine path, aliases  always refreshed, all cheap
+#   4. mosh                             install if missing
 #
 # Options are passed through to setup-picarx.sh:
 #   --skip-libs       the PiCar-X software is already installed, skip step 2
@@ -69,32 +71,54 @@ else
 fi
 
 # --- 2. the PiCar-X software ----------------------------------------------
+# Check each library separately and report it, so a student can see what this
+# run is actually going to do before it spends half an hour doing it.
 say "2. PiCar-X software"
+
+MISSING=()
+for pair in "robot_hat:robot-hat" "vilib:vilib" "picarx:picar-x"; do
+  module="${pair%%:*}"
+  label="${pair##*:}"
+  if python3 -c "import $module" 2>/dev/null; then
+    ok "$label"
+  else
+    echo "  ${YELLOW}--${OFF}   $label is missing"
+    MISSING+=("$label")
+  fi
+done
+
 if (( SKIP_LIBS )); then
   echo "  skipped (--skip-libs)"
-elif python3 -c "import picarx, robot_hat, vilib" 2>/dev/null; then
-  ok "already installed"
+elif (( ${#MISSING[@]} == 0 )); then
+  ok "nothing to install"
 else
+  echo
+  echo "  Installing: ${MISSING[*]}"
+  echo "  ${YELLOW}This can take 30-60 minutes. Leave the window open.${OFF}"
+  # setup-picarx.sh checks each library itself too, so the ones already present
+  # are skipped rather than rebuilt.
   bash "$REPO_DIR/setup-picarx.sh" "${PASS_THROUGH[@]+"${PASS_THROUGH[@]}"}" \
     || die "PiCar-X install failed -- see ~/picarx-install.log"
 fi
 
 # --- 3. everything else ----------------------------------------------------
 # Delegated to update.sh rather than repeated here: splash, roboshine's import
-# path, aliases and mosh. One code path means `update` and `setup-all` can't
-# drift apart.
-say "3. Splash, aliases, mosh"
+# path, aliases and mosh. One code path, so the two scripts can't drift apart.
+# All of it is cheap and needs no sudo unless something genuinely changed.
+say "3. Splash, roboshine, aliases, mosh"
 bash "$REPO_DIR/update.sh" || die "update.sh failed"
 
 # ---------------------------------------------------------------------------
 echo
-echo "${GREEN}${BOLD}Done.${OFF}"
+if (( ${#MISSING[@]} )); then
+  echo "${GREEN}${BOLD}Done -- installed: ${MISSING[*]}${OFF}"
+  echo
+  echo "Reboot before using the hardware:   ${BOLD}robotreboot${OFF}"
+else
+  echo "${GREEN}${BOLD}Done -- everything was already installed, just updated.${OFF}"
+fi
 echo
-echo "Reboot, then log back in to see the splash screen:"
-echo
-echo "    sudo reboot"
-echo
-echo "After that you can type:"
+echo "You can type:"
 echo "    ${BOLD}cockpit${OFF}     drive the robot"
 echo "    ${BOLD}robostat${OFF}    battery, temperature, WiFi"
 echo "    ${BOLD}update${OFF}      get the latest version of these tools"

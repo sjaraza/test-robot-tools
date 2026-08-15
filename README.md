@@ -220,26 +220,48 @@ source ~/.bashrc
 hostname, so `robot-7` shows `ROBOT-7` with no per-card editing.
 `setup-aliases.sh` installs `cockpit`, `robostat` and `update`.
 
-### `update` is the one command to remember
+### `update` is the only command to remember
 
 ```bash
 update
 ```
 
-Pulls, then refreshes the splash, roboshine's import path and the aliases, and
-installs mosh if it's missing. Built to be run often:
+It runs `setup-all.sh`, which works out what's already there and does only the
+rest. Same command for a fresh robot and for picking up changes later.
 
-- **No sudo unless something changed.** The splash is only written to `/etc/motd`
-  when it actually differs, so a routine `update` doesn't ask for a password.
+```
+== 2. PiCar-X software ==
+   ok   robot-hat
+   --   vilib is missing
+   ok   picar-x
+
+  Installing: vilib
+  This can take 30-60 minutes. Leave the window open.
+```
+
+On a robot that's fully set up it finishes in seconds and installs nothing:
+
+```
+   ok   robot-hat
+   ok   vilib
+   ok   picar-x
+   ok   nothing to install
+...
+Done -- everything was already installed, just updated.
+```
+
+Built to be run often:
+
+- **No sudo unless something changed.** `/etc/motd` is only written when the
+  splash actually differs, so a routine `update` never asks for a password.
 - **No clutter.** `~/.bashrc` is only rewritten when the aliases differ, and
-  there's a single `~/.bashrc.robotbak` rather than one backup per run.
-- **New aliases arrive automatically.** As the tools grow, a student who only
-  ever types `update` still ends up with them.
-- **It never touches robot-hat, vilib or picar-x.** Those are 30–60 minutes and
-  belong to `setup-picarx.sh`.
-
-`setup-all.sh` is for the *first* run — it installs the PiCar-X libraries, then
-calls `update.sh` for everything else, so the two can't drift apart.
+  there's a single `~/.bashrc.robotbak`, not one backup per run.
+- **New aliases arrive automatically**, so a student who only types `update`
+  still ends up with them as the tools grow.
+- **Each library is checked separately**, so a missing `vilib` doesn't rebuild
+  robot-hat or repeat the `apt upgrade`.
+- **Never re-installs what's present.** To take upstream SunFounder changes
+  deliberately, run `setup-picarx.sh --force`.
 
 The PiCar-X and robot-hat libraries live in `~/picar-x` and `~/robot-hat` on
 these robots; `install.sh` makes sure they're writable and the menu adds them to

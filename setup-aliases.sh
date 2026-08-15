@@ -60,7 +60,10 @@ trap 'rm -f "$TMP" "$NEW"' EXIT
   echo "$BEGIN"
   echo "alias cockpit='python3 $REPO_DIR/robotmenu.py'"
   echo "alias robostat='python3 $REPO_DIR/robostat.py'"
-  echo "alias update='bash $REPO_DIR/update.sh'"
+  # Deliberately setup-all.sh, not update.sh: it works out what's missing and
+  # installs only that, so one command covers both a fresh robot and picking up
+  # changes later. On a set-up robot it finishes in seconds.
+  echo "alias update='bash $REPO_DIR/setup-all.sh --yes'"
   echo "alias sb='source ~/.bashrc'"
   echo "alias eb='vi ~/.bashrc'"
   echo "alias robotreboot='sudo systemctl reboot'"
