@@ -372,6 +372,30 @@ CV runs there rather than here on purpose: a Zero 2 W has four slow cores and
 512MB, so the robot captures and hardware-encodes while the laptop does the
 thinking. The cockpit prints the exact command when you start the stream.
 
+## Announcing itself on boot
+
+```bash
+bash ~/test-robot-tools/setup-announce.sh
+```
+
+The robot then says its name and IP address out loud every time it boots —
+*"robot 7 ready. Address 192 dot 168 dot 1 dot 5"*. Genuinely useful when twenty
+identical robots are on a table and you need to know which one just came back.
+
+Light enough not to worry about: `espeak-ng` is about a megabyte and speaks in
+well under a second on a Zero 2 W. It needs the speaker working, so run
+`~/robot-hat/i2samp.sh` first (or `setup-picarx.sh --with-sound`).
+
+```bash
+bash ~/test-robot-tools/announce.sh                    # hear it now
+journalctl -u roboshine-announce -b                    # what it did at boot
+bash ~/test-robot-tools/setup-announce.sh --remove     # turn it off
+```
+
+It can't break a boot: with no speaker, no espeak-ng, or no network yet, it says
+so in the journal and exits cleanly. It waits up to 60s for an IP, because
+"network is online" and "WiFi has an address" aren't the same thing on a Pi.
+
 ## mosh
 
 ```bash

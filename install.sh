@@ -45,6 +45,25 @@ fi
 # A .pth file in the user's site-packages just adds this repo to Python's path,
 # so `update` keeps the library current with no reinstall step -- which pip
 # install would have required after every pull.
+# An SSH login runs bash as a *login* shell, which reads ~/.profile rather than
+# ~/.bashrc. Debian's default ~/.profile sources ~/.bashrc for you, so aliases
+# normally work on login already -- but if that file was replaced or trimmed,
+# nothing would load and the reason would be very unobvious. Make it certain.
+echo "checking login shells read ~/.bashrc ..."
+PROFILE="$HOME/.profile"
+if [[ -f "$PROFILE" ]] && grep -q '\.bashrc' "$PROFILE"; then
+  echo "  yes, ~/.profile already sources it"
+else
+  cat >> "$PROFILE" <<'PROFILE_EOF'
+
+# --- robot tools: make login shells read ~/.bashrc ---
+if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+  . "$HOME/.bashrc"
+fi
+PROFILE_EOF
+  echo "  added it to ~/.profile"
+fi
+
 echo "making roboshine importable ..."
 SITE="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
 if [[ -n "$SITE" ]]; then
