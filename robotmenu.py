@@ -1239,9 +1239,9 @@ def camera_stream():
     # The cockpit runs here on the robot, but computer vision runs on the
     # student's laptop -- so the most useful thing we can do is hand them the
     # exact command, with this robot's name already filled in.
-    print("  " + paint("to run computer vision, on YOUR LAPTOP:", GREY))
-    print("  " + paint(f"./laptop/cvclient.py {robot_number()}", BOLD, CYAN))
-    print("  " + paint("(needs: pip install opencv-python)", GREY))
+    print("  " + paint("to run computer vision, on YOUR LAPTOP or VM:", GREY))
+    print("  " + paint(f"./cvclient.py {robot_number()}", BOLD, CYAN))
+    print("  " + paint("(from the test-robot-lab repo)", GREY))
     print()
     print("  " + paint("The camera only encodes while something is watching,",
                        GREY))

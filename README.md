@@ -288,51 +288,31 @@ sudo reboot
 python3 ~/test-robot-tools/robotmenu.py --probe
 ```
 
-## Computer vision on the streamed frames
+## Computer vision, and the laptop side
 
-CV runs on the **laptop**, where there's real CPU. `laptop/cvclient.py` pulls the
-robot's MJPEG stream, hands you each frame as a numpy array, and draws the
-result.
+Laptop and VM code lives in a separate repo:
+**[test-robot-lab](https://github.com/sjaraza/test-robot-lab)**. It has
+`cvclient.py` (pulls this stream, hands you numpy frames, ships Haar-cascade and
+motion examples) and `setup-vm.sh` (one-time Ubuntu 24.04 setup: VS Code, OpenCV
+with contrib, mosh, mDNS).
 
-```bash
-pip install opencv-python          # once, on the laptop
+CV runs there rather than here on purpose: a Zero 2 W has four slow cores and
+512MB, so the robot captures and hardware-encodes while the laptop does the
+thinking. The cockpit prints the exact command when you start the stream.
 
-./laptop/cvclient.py 1                  # robot-1, Haar cascade faces
-./laptop/cvclient.py 1 --detect motion  # frame differencing
-./laptop/cvclient.py 1 --detect none    # just view, measure latency
-./laptop/cvclient.py 1 --no-window      # headless, print detections
-```
-
-Edit `process_frame(frame, state, detector)` to do your own work. `state` is a
-plain dict that survives between frames — the motion detector uses it to keep the
-previous frame.
-
-### Why not cv2.VideoCapture
-
-`cv2.VideoCapture` on an MJPEG URL works, and it's one line, but it **buffers
-internally**. If your CV is slower than the stream you fall progressively further
-behind until the picture is seconds stale — fatal for anything that steers.
-
-`cvclient.py` instead runs a reader thread that keeps only the newest frame and
-drops the rest. The overlay shows `age`, i.e. how stale the frame was when the
-CV loop picked it up, which is the honest end-to-end lag figure. If `age` climbs,
-your `process_frame` is too slow for the frame rate — lower the fps rather than
-letting lag build.
-
-
-### Greyscale
+## mosh
 
 ```bash
-python3 camstream.py --grey     # or answer y to the menu's greyscale prompt
+bash ~/test-robot-tools/setup-mosh.sh
 ```
 
-Worth using whenever you're doing CV rather than sightseeing. Haar cascades
-convert to grey as their very first step, so on a colour stream you're paying
-bandwidth to transmit chroma that gets discarded on arrival.
+Then connect with `mosh robot@robot-1.local` instead of `ssh`. On a congested
+2.4GHz AP it's a large improvement: keystrokes echo locally rather than waiting
+for a round trip, and sessions survive dropouts, roaming and a closed lid — which
+matters for the cockpit's full-screen redraws.
 
-This is `rpicam-vid --saturation 0` rather than a true single-channel JPEG: the
-format is unchanged so nothing downstream needs to care, but the chroma planes go
-constant and constant planes compress to nearly nothing. Expect meaningfully
-smaller frames and correspondingly less transmit latency — the exact saving
-depends on the scene.
+Needs installing on both ends. `setup-picarx.sh` now includes it for new robots,
+so `setup-mosh.sh` is for robots already set up.
 
+⚠️ mosh requires a UTF-8 locale and refuses to start without one. This robot has
+had exactly that problem before, so the script checks and prints the fix.

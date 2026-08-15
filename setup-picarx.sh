@@ -136,10 +136,13 @@ fi
 
 # python3-dev and i2c-tools aren't in SunFounder's list but the builds want the
 # former and i2cdetect is how you check the hat is actually on the bus.
+# mosh is here rather than in its own step because it's one apt package and it
+# transforms interactive work over a congested 2.4GHz AP: local echo, and
+# sessions that survive dropouts and a closed lid.
 sudo apt-get "${APT_OPTS[@]}" install \
-  git python3-pip python3-setuptools python3-smbus python3-dev i2c-tools \
+  git python3-pip python3-setuptools python3-smbus python3-dev i2c-tools mosh \
   || die "installing base packages failed"
-ok "git, pip, setuptools, smbus, python3-dev, i2c-tools"
+ok "git, pip, setuptools, smbus, python3-dev, i2c-tools, mosh"
 
 # ---------------------------------------------------------------------------
 
