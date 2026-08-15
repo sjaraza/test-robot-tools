@@ -287,3 +287,35 @@ Afterwards:
 sudo reboot
 python3 ~/test-robot-tools/robotmenu.py --probe
 ```
+
+## Computer vision on the streamed frames
+
+CV runs on the **laptop**, where there's real CPU. `laptop/cvclient.py` pulls the
+robot's MJPEG stream, hands you each frame as a numpy array, and draws the
+result.
+
+```bash
+pip install opencv-python          # once, on the laptop
+
+./laptop/cvclient.py 1                  # robot-1, Haar cascade faces
+./laptop/cvclient.py 1 --detect motion  # frame differencing
+./laptop/cvclient.py 1 --detect none    # just view, measure latency
+./laptop/cvclient.py 1 --no-window      # headless, print detections
+```
+
+Edit `process_frame(frame, state, detector)` to do your own work. `state` is a
+plain dict that survives between frames — the motion detector uses it to keep the
+previous frame.
+
+### Why not cv2.VideoCapture
+
+`cv2.VideoCapture` on an MJPEG URL works, and it's one line, but it **buffers
+internally**. If your CV is slower than the stream you fall progressively further
+behind until the picture is seconds stale — fatal for anything that steers.
+
+`cvclient.py` instead runs a reader thread that keeps only the newest frame and
+drops the rest. The overlay shows `age`, i.e. how stale the frame was when the
+CV loop picked it up, which is the honest end-to-end lag figure. If `age` climbs,
+your `process_frame` is too slow for the frame rate — lower the fps rather than
+letting lag build.
+
