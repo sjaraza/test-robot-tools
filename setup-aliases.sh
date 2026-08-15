@@ -63,7 +63,11 @@ trap 'rm -f "$TMP" "$NEW"' EXIT
   # Deliberately setup-all.sh, not update.sh: it works out what's missing and
   # installs only that, so one command covers both a fresh robot and picking up
   # changes later. On a set-up robot it finishes in seconds.
-  echo "alias update='bash $REPO_DIR/setup-all.sh --yes'"
+  #
+  # --skip-upgrade matters: `update` is meant to be run mid-session, and a full
+  # 'apt upgrade' there could take twenty minutes, pull in a kernel, and want a
+  # reboot. Upgrading the system is a separate, deliberate act.
+  echo "alias update='bash $REPO_DIR/setup-all.sh --yes --skip-upgrade'"
   echo "alias sb='source ~/.bashrc'"
   echo "alias eb='vi ~/.bashrc'"
   echo "alias robotreboot='sudo systemctl reboot'"

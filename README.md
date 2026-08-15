@@ -252,6 +252,9 @@ Done -- everything was already installed, just updated.
 
 Built to be run often:
 
+- **Never runs `apt upgrade`.** The alias passes `--skip-upgrade`, so `update` is
+  safe mid-session — a system upgrade could take twenty minutes and want a
+  reboot. Upgrade deliberately instead: `sudo apt update && sudo apt upgrade`.
 - **No sudo unless something changed.** `/etc/motd` is only written when the
   splash actually differs, so a routine `update` never asks for a password.
 - **No clutter.** `~/.bashrc` is only rewritten when the aliases differ, and
