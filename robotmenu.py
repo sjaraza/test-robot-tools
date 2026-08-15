@@ -526,8 +526,36 @@ def dashboard_lines():
     return rows
 
 
+def clip(text, width):
+    """Cut `text` to `width` visible columns, keeping ANSI escapes intact.
+
+    Needed because a long hostname or a long IP would otherwise push the frame's
+    right-hand border out and the box would look broken. Counting visible
+    characters means the colour codes don't consume any of the budget.
+    """
+    if visible_length(text) <= width:
+        return text
+    out = []
+    visible = 0
+    index = 0
+    while index < len(text) and visible < width:
+        if text[index] == "\033":            # copy the whole escape sequence
+            while index < len(text) and text[index] != "m":
+                out.append(text[index])
+                index += 1
+            if index < len(text):
+                out.append(text[index])
+                index += 1
+            continue
+        out.append(text[index])
+        visible += 1
+        index += 1
+    return "".join(out) + RESET
+
+
 def pad(text, width):
-    """Pad to `width` visible columns, ignoring ANSI escapes."""
+    """Fit `text` to exactly `width` visible columns: clip if long, pad if short."""
+    text = clip(text, width)
     return text + " " * max(0, width - visible_length(text))
 
 
