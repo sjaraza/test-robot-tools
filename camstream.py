@@ -6,7 +6,9 @@ Directly:
 
     camstream.py                  serve on port 8080
     camstream.py --fps 5          gentler on the WiFi
+    camstream.py --grey           drop colour: smaller and faster, and what CV wants
     camstream.py --quality 55     smaller frames, if your rpicam-vid supports it
+    camstream.py --dummy          synthetic test pattern, no camera involved
 
 Design notes:
 
@@ -265,6 +267,13 @@ class Encoder:
         # --quality isn't accepted by every rpicam-vid build, so it's opt-in.
         if self.args.quality:
             parts += ["--quality", str(self.args.quality)]
+        if self.args.grey:
+            # Not a true single-channel JPEG -- the format stays the same, so
+            # nothing downstream changes -- but the chroma planes go constant
+            # and constant planes compress to almost nothing. Haar cascades
+            # convert to grey as their first step anyway, so for CV work the
+            # colour was bandwidth spent to be thrown away on arrival.
+            parts += ["--saturation", "0"]
         if self.args.hflip:
             parts.append("--hflip")
         if self.args.vflip:
@@ -503,6 +512,9 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--idle-timeout", type=float, default=300.0,
                         help="seconds with no viewer before the camera releases")
+    parser.add_argument("--grey", "--gray", action="store_true",
+                        help="drop colour: smaller frames, lower latency, and "
+                             "what CV wants anyway")
     parser.add_argument("--dummy", action="store_true",
                         help="serve a synthetic test pattern instead of the "
                              "camera, to prove the HTTP path works")
@@ -538,7 +550,8 @@ def main():
 
     host = socket.gethostname().split(".")[0]
     log(f"serving http://{host}.local:{args.port}/ "
-        f"({args.width}x{args.height} @ {args.fps}fps, "
+        f"({args.width}x{args.height} @ {args.fps}fps"
+        f"{', greyscale' if args.grey else ''}, "
         f"camera idles out after {args.idle_timeout:.0f}s)")
 
     try:

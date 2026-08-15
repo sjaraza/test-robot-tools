@@ -1168,6 +1168,7 @@ def camera_stream():
     dummy = bool(answer) and answer.lower().startswith("y")
 
     fps = 5
+    grey = False
     if dummy:
         print("  " + paint("test pattern runs at a fixed 5fps -- it's drawn in",
                            GREY))
@@ -1180,6 +1181,11 @@ def camera_stream():
         fps = ask_number("  fps (1-30) [24]: ", 1, 30, 24)
         if fps is None:
             return False
+        print("  " + paint("greyscale is smaller and lower latency, and is what",
+                           GREY))
+        print("  " + paint("face detection uses anyway.", GREY))
+        answer = ask("  greyscale? [y/N]: ", "n")
+        grey = bool(answer) and answer.lower().startswith("y")
 
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "camstream.py")
@@ -1190,6 +1196,8 @@ def camera_stream():
     command = [sys.executable, script, "--fps", str(fps)]
     if dummy:
         command.append("--dummy")
+    if grey:
+        command.append("--grey")
 
     # start_new_session so the stream outlives this menu, and its own log file
     # so a failure to open the camera is recoverable after the fact.

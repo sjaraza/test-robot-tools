@@ -319,3 +319,20 @@ CV loop picked it up, which is the honest end-to-end lag figure. If `age` climbs
 your `process_frame` is too slow for the frame rate — lower the fps rather than
 letting lag build.
 
+
+### Greyscale
+
+```bash
+python3 camstream.py --grey     # or answer y to the menu's greyscale prompt
+```
+
+Worth using whenever you're doing CV rather than sightseeing. Haar cascades
+convert to grey as their very first step, so on a colour stream you're paying
+bandwidth to transmit chroma that gets discarded on arrival.
+
+This is `rpicam-vid --saturation 0` rather than a true single-channel JPEG: the
+format is unchanged so nothing downstream needs to care, but the chroma planes go
+constant and constant planes compress to nearly nothing. Expect meaningfully
+smaller frames and correspondingly less transmit latency — the exact saving
+depends on the scene.
+
