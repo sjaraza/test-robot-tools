@@ -379,6 +379,7 @@ robot.stop()
 | `driveForward(speed=10)` | start driving forward; keeps going until `stop()` |
 | `driveBack(speed=10)` | start driving backward; keeps going until `stop()` |
 | `stop()` | stop the motors; wheels stay pointed where they were |
+| `setWheels(left, right)` | the two back wheels separately, −100…100 each |
 | `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
 | `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
 | `steerStraight()` | point them straight ahead |
@@ -396,6 +397,33 @@ robot.stop()
 
 To pause, use Python's own `time.sleep(seconds)` — roboshine deliberately has no
 pause of its own.
+
+### One wheel at a time
+
+`driveForward()` drives both back wheels together. `setWheels()` drives them
+separately:
+
+```python
+robot.setWheels(30, 30)     # both forwards — same as driveForward(30)
+robot.setWheels(30, 0)      # left wheel only: a slow arc to the right
+robot.setWheels(-20, 20)    # the two wheels pushing against each other
+```
+
+−100…100 each, positive being forwards for that wheel. It returns immediately like
+the other drive commands, leaves the front wheels wherever they were steered, and
+respects `flipDrive()` — so "forwards" means the same thing here as everywhere
+else.
+
+Underneath, picarx numbers the motors 1 and 2 and mounts them mirror-image: its own
+`forward()` drives motor 1 positive and motor 2 *negative* to go straight ahead.
+`setWheels()` undoes that, so a student thinking about wheels never has to think
+about which way a motor faces.
+
+**It steers like a car, not a tank.** The front wheels are pointed wherever the
+servo left them and can't slide sideways, so `setWheels(30, -30)` doesn't spin the
+robot neatly on the spot — it scrubs, pulls a lot of current, and how it turns
+depends mostly on how slippery the floor is. Worth watching once; don't hold it
+there. An arc with one wheel stopped behaves far better.
 
 ### If your robot drives the wrong way
 

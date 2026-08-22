@@ -51,10 +51,10 @@ import time
 
 from . import _config
 
-__version__ = "0.9"
+__version__ = "1.0"
 
 __all__ = [
-    "driveForward", "driveBack", "stop",
+    "driveForward", "driveBack", "setWheels", "stop",
     "steer", "steerLeft", "steerRight", "steerStraight", "get_steer_angle",
     "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
     "get_distance_cm", "read_line_sensors", "checkLineSensors",
@@ -206,6 +206,50 @@ def driveBack(speed=10):
         stop()
     """
     _run(True, speed)
+
+
+def setWheels(left, right):
+    """Drive the two back wheels separately. The low-level one.
+
+        setWheels(30, 30)     both forwards -- same as driveForward(30)
+        setWheels(30, 0)      only the left wheel: a slow arc to the right
+        setWheels(-20, 20)    the two wheels pushing against each other
+
+    left, right : -100 to 100 each. Positive drives that wheel forwards,
+    negative backwards, 0 stops it.
+
+    Like the other drive commands this returns immediately and keeps going until
+    stop() is called, and it leaves the front wheels wherever you steered them.
+    It also respects flipDrive(), so "forwards" means the same thing here as
+    everywhere else.
+
+    Worth knowing before you try setWheels(30, -30): this robot steers like a car,
+    not like a tank. The front wheels are pointed wherever the servo left them and
+    can't slide sideways, so opposing the back wheels doesn't spin it neatly on the
+    spot -- it scrubs, draws a lot of current, and how it turns depends mostly on
+    how slippery the floor is. Fun to watch for a second; don't hold it there.
+
+    An arc with one wheel stopped, like setWheels(30, 0), works much better.
+    """
+    _check_number(left, "left", -100, 100)
+    _check_number(right, "right", -100, 100)
+
+    car = _hardware()
+    setter = getattr(car, "set_motor_speed", None)
+    if setter is None:
+        raise RuntimeError(
+            "this robot's library has no per-wheel control "
+            "(picarx.set_motor_speed is missing)")
+
+    if _config.drive_flipped():
+        left, right = -left, -right
+
+    # picarx numbers the motors 1 and 2, and they are mounted mirror-image: its
+    # own forward() drives motor 1 positive and motor 2 negative to go straight.
+    # Undoing that here is the whole point of this function -- so that a student
+    # thinking about wheels doesn't have to think about which way a motor faces.
+    setter(1, int(left))
+    setter(2, int(-right))
 
 
 def stop():
@@ -527,6 +571,13 @@ roboshine {__version__} -- robot commands you can use in your own scripts
 
     stop()
         Stop the motors. The wheels stay pointed where they were.
+
+    setWheels(left, right)
+        The two back wheels separately, -100 to 100 each. Positive is forwards.
+          setWheels(30, 30)     both forwards, same as driveForward(30)
+          setWheels(30, 0)      left wheel only: a slow arc to the right
+        It steers like a car, not a tank, so setWheels(30, -30) scrubs and
+        fights itself rather than spinning neatly. Look, don't hold.
 
   STEERING
     steerLeft(degrees=30)     point the front wheels left
