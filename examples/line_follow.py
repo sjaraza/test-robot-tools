@@ -7,26 +7,32 @@ Run it on the robot:
 
 Press Ctrl-C to stop. The motors always stop when the script ends.
 
-Before you start, check what the sensors actually see. Put the robot on the line
+roboshine hands you the three sensor readings and nothing else -- deciding what
+they mean is this script's job, and the interesting part. Read it, then change it.
+
+Before you start, look at what the sensors actually see. Put the robot on the line
 and run:
 
-    python3 -c "import roboshine as r; print(r.get_line_sensors())"
+    python3 -c "import roboshine as r; print(r.read_line_sensors())"
 
-The reading under the line should be clearly lower than the other two -- lower
-means darker. If all three look the same, the line isn't under the sensors, so
-move the robot.
+You get something like {'L': 812, 'C': 240, 'R': 795}. Lower means darker, so the
+reading under the line should be clearly lower than the other two. If all three
+look the same, the line isn't under the sensors -- move the robot.
 """
+
+import time
 
 import roboshine as robot
 
 SPEED = 15          # slow. A fast line follower overshoots every corner.
-GAIN = 25           # how hard to steer. The number worth playing with
+TURN = 15           # how hard to steer when the line drifts to one side
+MARGIN = 50         # how different the readings must be to count as seeing a line
 CHECK_EVERY = 0.05  # seconds between looks at the sensors
 LOST_LIMIT = 20     # about a second of seeing nothing before giving up
 
 print("Following the line. Ctrl-C to stop.")
 print("Put the robot on the line before it starts moving.")
-robot.wait(2)
+time.sleep(2)
 
 robot.steerStraight()
 robot.driveForward(SPEED)
@@ -35,29 +41,41 @@ lost_count = 0
 
 try:
     while True:
-        turn = robot.get_line(GAIN)
+        sensors = robot.read_line_sensors()
+        left = sensors["L"]
+        centre = sensors["C"]
+        right = sensors["R"]
 
-        if turn is None:
-            # None means the three sensors read too much alike to tell where the
-            # line is. Keep the last steering angle for a moment in case it's a
-            # gap in the tape, rather than stopping at every join.
+        darkest = min(left, centre, right)
+        brightest = max(left, centre, right)
+
+        # If all three readings are close together there's nothing to steer by:
+        # either the line isn't under the robot, or all three are on it. Comparing
+        # the sensors against each other like this means there's nothing to
+        # calibrate for your floor.
+        if brightest - darkest < MARGIN:
             lost_count += 1
             if lost_count > LOST_LIMIT:
                 print("\nLost the line. Stopping.")
                 break
+
         else:
             lost_count = 0
 
-            # turn is negative when the line is off to the left and positive when
-            # it's off to the right -- the same direction steer() uses, so it goes
-            # straight in with no minus sign to get the wrong way round. The
-            # further off the line, the bigger the number, so gentle drifts get
-            # gentle corrections.
-            robot.steer(turn)
+            # The darkest sensor is the one over the line.
+            if darkest == left:
+                robot.steerLeft(TURN)
+                where = "left  "
+            elif darkest == right:
+                robot.steerRight(TURN)
+                where = "right "
+            else:
+                robot.steerStraight()
+                where = "centre"
 
-            print(f"steer {turn:+6.1f}°   ", end="\r")
+            print(f"line {where}  {sensors}", end="\r")
 
-        robot.wait(CHECK_EVERY)
+        time.sleep(CHECK_EVERY)
 
 except KeyboardInterrupt:
     print("\nStopped by you.")
@@ -66,13 +84,13 @@ robot.stop()
 robot.steerStraight()
 
 # Things to try:
-#   * raise GAIN until it starts wobbling, then back off a little -- that's about
-#     as hard as it can correct on your floor
-#   * raise SPEED once the steering looks steady
+#   * raise SPEED and see where it starts overshooting corners
+#   * raise TURN for sharper corrections -- too high and it wobbles
 #   * lower CHECK_EVERY so it reacts more often
-#   * watch the numbers behind the steering:
-#       print(robot.get_line_sensors(), robot.get_line())
-#   * ease into the new angle instead of jumping to it, which wobbles less:
-#       robot.steer(robot.get_steer_angle() * 0.6 + turn * 0.4)
+#   * this steers by the same amount however far off the line it is, which is why
+#     it wobbles. Work out *how far* off it is and steer in proportion:
+#         steer() takes any angle from -30 to 30, so you can calculate one
 #   * stop when something is in the way too:
-#       if 0 < robot.get_distance_cm() < 15: break
+#         if 0 < robot.get_distance_cm() < 15: break
+#   * if it steers the wrong way, check the sensors are the way round roboshine
+#     thinks: python3 -c "import roboshine as r; r.checkLineSensors()"

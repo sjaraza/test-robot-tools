@@ -2,11 +2,12 @@
 
 Runs on the robot. Put this at the top of your script:
 
+    import time
     import roboshine as robot
 
     robot.steerLeft(20)
     robot.driveForward(20)
-    robot.wait(2)
+    time.sleep(2)
     robot.stop()
 
 Type robot.showHelp() to see everything available.
@@ -22,10 +23,21 @@ Notes for anyone reading the code rather than using it:
 * Driving and steering are separate on purpose. driveForward() does not touch
   the steering, so steerLeft() then driveForward() curves left -- if driving
   straightened the wheels, the steer command would silently be undone.
-* Every command returns immediately. driveForward() sets the motors going and
-  hands control straight back, so the robot keeps driving until stop() is
-  called. That means a script can watch a sensor while moving. wait() is the
-  only command that pauses, which keeps it obvious where the pauses are.
+* Nothing in here pauses. Every command returns immediately: driveForward()
+  sets the motors going and hands control straight back, so the robot keeps
+  driving until stop() is called, and a script can watch a sensor while moving.
+  Pausing is time.sleep()'s job, which keeps the pauses in the student's script
+  where they can see them. (checkLineSensors() is the one exception, and only
+  because it waits for you to press Enter.)
+* The sensor readers never pause either, which is the whole point of them. An
+  ultrasonic sensor needs quiet between pings, so get_distance_cm() skips the
+  ping when it's called too soon and hands back what it already knows, rather
+  than sleeping until the sensor is ready -- a sleep there would leave the robot
+  driving blind inside somebody's steering loop. (checkLineSensors() is the one
+  exception, and only because it waits for you to press Enter.)
+* The sensors hand back numbers, not decisions. read_line_sensors() gives the
+  three readings and stops there: working out what they mean is the interesting
+  part, and doing it for students would take the lesson away.
 * The hardware is opened lazily, on the first command that needs it. So
   showHelp() works on a machine with no robot attached, and importing this
   module can't fail because a servo is unplugged.
@@ -37,15 +49,14 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.7"
+__version__ = "0.8"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
     "steer", "steerLeft", "steerRight", "steerStraight", "get_steer_angle",
     "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
-    "get_distance_cm",
-    "get_line_sensors", "get_line", "checkLineSensors",
-    "wait", "showHelp",
+    "get_distance_cm", "read_line_sensors", "checkLineSensors",
+    "showHelp",
 ]
 
 # picarx steering limit, degrees either side of straight.
@@ -59,15 +70,27 @@ MAX_TILT_DOWN = 35
 
 # An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
 # and the echo from the previous ping arrives inside the next measurement window,
-# which reads as wildly wrong distances rather than as noise.
+# which reads as wildly wrong distances rather than as noise. get_distance_cm()
+# honours this by *not pinging* when it's called too soon, rather than by sleeping
+# -- sleeping would stall whatever loop the student wrote.
 PING_SPACING = 0.06
 PING_SAMPLES = 3
+
+# How long a distance reading is worth remembering. On a moving robot an older one
+# is a measurement of somewhere else.
+PING_MEMORY = 0.5
 
 _car = None
 
 # The steering angle roboshine last asked for. The picar-x servo can't be read
 # back, so this is the only way get_steer_angle() can answer at all.
 _steer_angle = 0
+
+# Recent distance readings as (timestamp, centimetres), oldest first, and when the
+# sensor was last pinged. Kept here so get_distance_cm() can average over a loop's
+# worth of readings without ever pausing to collect them.
+_ping_history = []
+_last_ping_at = 0.0
 
 
 def _hardware():
@@ -159,7 +182,7 @@ def driveForward(speed=10):
 
         driveForward(20)
         while get_distance_cm() > 20:
-            wait(0.1)
+            time.sleep(0.1)
         stop()
 
     The front wheels stay wherever you last pointed them, so this curves if you
@@ -172,7 +195,7 @@ def driveBack(speed=10):
     """Start driving backwards, and keep going until stop() is called.
 
         driveBack(20)
-        wait(1)
+        time.sleep(1)
         stop()
     """
     _run(True, speed)
@@ -199,9 +222,8 @@ def steer(angle):
     from you -- following a line, say, where how hard to steer depends on how far
     off the line the robot is:
 
-        turn = get_line(25)                  # -30 to 30, or None if it can't tell
-        if turn is not None:
-            steer(turn)
+        sensors = read_line_sensors()
+        steer(<something you work out from those three numbers>)
 
     steerLeft() and steerRight() are this with the sign built in.
     """
@@ -298,17 +320,32 @@ def get_distance_cm(samples=PING_SAMPLES):
     Returns -1 when nothing is close enough to bounce the sound back.
 
         space = get_distance_cm()
-        if space > 0 and space < 20:
+        if 0 < space < 20:
             stop()
 
-    Takes the middle of three readings, spaced out slightly. One reading on its
-    own is often wrong: sound bounces off more than you'd think.
-    """
-    car = _hardware()
+    Returns straight away -- it never pauses your script. That matters in a loop
+    that is also steering: a pause here would leave the robot driving blind for as
+    long as it lasted.
 
-    readings = []
-    for _ in range(max(1, int(samples))):
-        time.sleep(PING_SPACING)
+    The sensor needs about 60ms of quiet between pings, so calling this faster than
+    that gives you the most recent answer again rather than a new ping. Called in a
+    loop it keeps the last few readings and hands back the middle one, which is
+    steadier than any single reading -- sound bounces off more than you would
+    think. The first call has only one reading to go on, so give it a few times
+    round the loop before trusting a surprising number.
+    """
+    global _last_ping_at
+
+    car = _hardware()
+    keep = max(1, int(samples))
+    now = time.monotonic()
+
+    # Only fire a fresh ping once the sensor has had its quiet time. Firing sooner
+    # doesn't just waste effort: the echo from the previous ping arrives inside
+    # this measurement window, which reads as a wildly wrong distance rather than
+    # as noise.
+    if now - _last_ping_at >= PING_SPACING:
+        _last_ping_at = now
 
         value = None
         for name in ("get_distance", "ultrasonic"):
@@ -320,14 +357,33 @@ def get_distance_cm(samples=PING_SAMPLES):
 
         if value is None:
             raise RuntimeError("this robot has no ultrasonic sensor fitted")
-        if value > 0:
-            readings.append(float(value))
 
-    if not readings:
+        # A reading of 0 or less means no echo came back. The ping still happened,
+        # so the timer above is right to have moved, but there's no distance to
+        # remember.
+        if value > 0:
+            _ping_history.append((now, float(value)))
+
+    # Readings go stale: on a moving robot a second-old distance is a distance
+    # from somewhere else. Dropping them is also what lets -1 mean "nothing in
+    # range" again once whatever was in front has gone. Keeping only the last
+    # `keep` of what survives is what makes the median a median of recent pings.
+    #
+    # Written as one rebuild rather than a del-slice on purpose: `del
+    # history[:len(history) - keep]` looks equivalent but goes negative while
+    # fewer than `keep` readings have been collected, which silently throws away
+    # everything except the newest -- and then the "median" is a single reading
+    # and any outlier wins.
+    _ping_history[:] = [
+        (stamp, value) for stamp, value in _ping_history
+        if now - stamp <= PING_MEMORY
+    ][-keep:]
+
+    if not _ping_history:
         return -1.0
 
-    readings.sort()
-    return round(readings[len(readings) // 2], 1)
+    values = sorted(value for _, value in _ping_history)
+    return round(values[len(values) // 2], 1)
 
 
 # How different the three readings must be before we'll say the line is under one
@@ -336,12 +392,12 @@ def get_distance_cm(samples=PING_SAMPLES):
 LINE_MARGIN = 50
 
 
-def get_line_sensors():
+def read_line_sensors():
     """The three line sensors under the front of the robot.
 
     Returns a dict with the left, centre and right readings:
 
-        sensors = get_line_sensors()
+        sensors = read_line_sensors()
         print(sensors)                      # {'L': 812, 'C': 240, 'R': 795}
         print(sensors["C"])                 # just the middle one
 
@@ -366,64 +422,6 @@ def get_line_sensors():
     return {"L": left, "C": centre, "R": right}
 
 
-def get_line(gain=1, margin=LINE_MARGIN):
-    """Where the line is: negative if it is off to the left, positive to the right.
-
-        turn = get_line(25)
-        if turn is not None:
-            steer(turn)                     # follow the line
-        else:
-            stop()                          # can't see it any more
-
-    With no `gain` the answer runs from -1 (line hard left) through 0 (line under
-    the middle sensor) to +1 (line hard right). Give a gain and it is multiplied
-    by it, so `get_line(25)` hands back a number you can pass straight to
-    steer() -- bigger gain means sharper corrections.
-
-    Returns **None** when the three sensors read too much alike to tell where the
-    line is: either it isn't under the robot at all, or all three are sitting on
-    it. Always check for None before using the number; treating it as 0 would
-    drive the robot confidently off the track.
-
-    gain   : 0 to 100. Not an angle -- it's how much steering you get per unit of
-             error, so a big gain means the wheels go to full lock while the line
-             is still only halfway across the sensors. The answer is kept inside
-             the wheels' -30 to 30 limit, so a gain that's too big simply stops
-             helping rather than making steer() complain.
-    margin : how different the readings must be before it will answer at all.
-             The default suits most floors; raise it if you get numbers when the
-             robot is clearly lost, lower it if you get None when it isn't.
-
-    Worked out from how dark each sensor is compared with the brightest of the
-    three, so there is nothing to calibrate for a particular floor or room.
-    """
-    _check_number(gain, "gain", 0, 100)
-    _check_number(margin, "margin", 0, 4096)
-
-    sensors = get_line_sensors()
-    readings = (sensors["L"], sensors["C"], sensors["R"])
-
-    if max(readings) - min(readings) < margin:
-        return None                     # all three agree; nothing to steer by
-
-    # Lower is darker, so "how dark" is the distance below the brightest reading.
-    # The brightest sensor scores 0 and drops out, which is what makes the sum
-    # below behave.
-    brightest = max(readings)
-    weights = [brightest - value for value in readings]
-    total = sum(weights)
-    if total == 0:
-        return None
-
-    # -1 for the left sensor, 0 for the middle, +1 for the right.
-    position = (-weights[0] + weights[2]) / total
-    answer = position * gain
-
-    # Clamped so that get_line(40) can't produce an angle steer() would refuse.
-    answer = max(-MAX_STEER, min(MAX_STEER, answer))
-    return round(answer, 2)
-
-
 def checkLineSensors():
     """Check the three sensors are the way round roboshine thinks they are.
 
@@ -445,7 +443,7 @@ def checkLineSensors():
 
     for expected in keys:
         input(f"  Cover the {names[expected].upper()} sensor, then press Enter ... ")
-        sensors = get_line_sensors()
+        sensors = read_line_sensors()
 
         # Lower is darker, so the covered sensor should be the smallest reading.
         darkest = min(keys, key=lambda key: sensors[key])
@@ -461,21 +459,10 @@ def checkLineSensors():
     if good:
         print("All three match: L, C and R are correct.")
     else:
-        print("The sensors don't match their names, so get_line_sensors() has")
-        print("them mislabelled and get_line() will steer the wrong way.")
+        print("The sensors don't match their names, so read_line_sensors() has")
+        print("them mislabelled, so anything you steer from them is mirrored.")
         print("Worth reporting before the robot is used.")
     return good
-
-
-def wait(seconds):
-    """Do nothing for a while. The robot keeps doing whatever it was doing.
-
-        driveForward(20)
-        wait(1.5)
-        stop()
-    """
-    _check_number(seconds, "seconds", 0, 3600)
-    time.sleep(seconds)
 
 
 def showHelp():
@@ -504,7 +491,7 @@ roboshine {__version__} -- robot commands you can use in your own scripts
 
     steer(angle)              exact angle: -30 is full left, 30 full right
         For angles you calculate rather than type:
-          steer(get_line(25))
+          steer(get_steer_angle() * 0.7 + wanted * 0.3)
     get_steer_angle()         the angle the wheels are pointing now
 
   CAMERA
@@ -520,57 +507,49 @@ roboshine {__version__} -- robot commands you can use in your own scripts
   SENSING
     get_distance_cm()
         Centimetres to the thing in front. -1 means nothing is in range.
+        Never pauses your script, so it's safe to call inside a driving loop.
 
-    get_line_sensors()
+    read_line_sensors()
         The three sensors underneath, as {{'L': .., 'C': .., 'R': ..}}.
-        Lower numbers are darker, so a black line reads lower than the floor.
-          sensors = get_line_sensors()
+        Lower numbers are darker, so the sensor over a black line reads lower
+        than the two on the floor.
+          sensors = read_line_sensors()
+          print(sensors)               all three
           print(sensors["C"])          just the middle one
-
-    get_line(gain=1)
-        Where the line is: negative means it's off to the left, positive means
-        right, 0 means dead centre. None when the sensors can't tell.
-        With a gain, the answer is ready to steer with:
-          turn = get_line(25)
-          if turn is not None:  steer(turn)
-          else:                 stop()
-        A bigger gain corrects harder. Never goes outside -30 to 30.
+        What the numbers mean is up to you -- that's the interesting part.
 
     checkLineSensors()
         Check L and R aren't the other way round. Worth doing once on a robot
-        you haven't used before.
+        you haven't used before. This one waits for you to press Enter.
 
   OTHER
-    wait(seconds)     pause your script; the robot carries on
     showHelp()        print this
+        To pause, use Python's own time.sleep(seconds) -- nothing in roboshine
+        pauses on its own.
 
 A whole script looks like this:
 
+  import time
   import roboshine as robot
 
   robot.steerLeft(20)
   robot.driveForward(20)     # starts moving, curving left
-  robot.wait(2)              # ...for two seconds
+  time.sleep(2)              # ...for two seconds
   robot.stop()
 
   robot.steerStraight()
   robot.driveForward(20)
   while robot.get_distance_cm() > 20:    # drive until something is close
-      robot.wait(0.1)
+      time.sleep(0.1)
   robot.stop()
 
-Following a line is the same shape, steering by how far off it is:
+Reading the line sensors looks like this. What to do about the numbers is the
+puzzle -- see examples/line_follow.py for one way:
 
-  robot.driveForward(15)
-  while True:
-      turn = robot.get_line(25)          # -30 to 30, or None if it can't tell
-      if turn is None:
-          robot.stop()
-          break
-      robot.steer(turn)                  # bigger gain = sharper corrections
-      robot.wait(0.05)
+  sensors = robot.read_line_sensors()
+  print(sensors)                       # {{'L': 812, 'C': 240, 'R': 795}}
 
 Driving and steering are separate, so driveForward() keeps whatever steering you
-set. Commands return immediately; wait() is the only one that pauses. The motors
-always stop when your script finishes, even if it crashes.
+set. Nothing here pauses -- use time.sleep() for that -- and the motors always
+stop when your script finishes, even if it crashes.
 """)

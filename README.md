@@ -349,18 +349,19 @@ python3 ~/test-robot-tools/robotmenu.py --probe
 A small Python library on the robot, importable from any directory:
 
 ```python
+import time
 import roboshine as robot
 
 robot.steerLeft(20)          # point the wheels
 robot.driveForward(20)       # start moving, curving left
-robot.wait(2)                # ...for two seconds
+time.sleep(2)                # ...for two seconds
 robot.stop()
 
-# Nothing blocks except wait(), so you can watch a sensor while driving:
+# Nothing in roboshine pauses, so you can watch a sensor while driving:
 robot.steerStraight()
 robot.driveForward(15)
 while robot.get_distance_cm() > 25:
-    robot.wait(0.1)
+    time.sleep(0.1)
 robot.stop()
 ```
 
@@ -378,11 +379,12 @@ robot.stop()
 | `lookUp(degrees=65)` / `lookDown(degrees=35)` | tilt the camera |
 | `lookStraight()` | camera straight ahead and level |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
-| `get_line_sensors()` | the three sensors underneath as `{'L': …, 'C': …, 'R': …}` |
-| `get_line(gain=1)` | where the line is: −ve left, +ve right, `None` if it can't tell |
+| `read_line_sensors()` | the three sensors underneath as `{'L': …, 'C': …, 'R': …}` |
 | `checkLineSensors()` | check L and R aren't swapped |
-| `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
+
+To pause, use Python's own `time.sleep(seconds)` — roboshine deliberately has no
+pause of its own.
 
 ```bash
 python3 -c "import roboshine; roboshine.showHelp()"
@@ -392,59 +394,56 @@ python3 ~/test-robot-tools/examples/line_follow.py
 
 ### Line following
 
-Two functions, and only one of them is needed to follow a line.
-
-`get_line_sensors()` is the raw look at what's underneath — a dict, keyed the same
-way as the `L C R` labels in the cockpit, so there's no order to remember:
+roboshine gives you the three readings and stops there. Working out what they mean
+is the exercise — and the reason there is only one function here.
 
 ```python
-sensors = robot.get_line_sensors()
+sensors = robot.read_line_sensors()
 print(sensors)                  # {'L': 812, 'C': 240, 'R': 795}
 print(sensors["C"])             # just the middle one
 ```
 
-Lower means darker, so the sensor over a black line reads lower than the two on
-the floor.
+It's a dict, keyed the same way as the `L C R` labels the cockpit prints above the
+same readings — so there's no argument order to remember, and no way to mix up
+left and right by accident.
 
-`get_line(gain)` turns those three numbers into one number to steer by:
+**Lower means darker**, so the sensor over a black line reads lower than the two on
+the floor. The actual numbers depend on the floor and the lighting, which is why
+the first thing to do is print them and look.
+
+From there it's ordinary Python. The smallest of the three is the sensor over the
+line; if all three are close together there's nothing to steer by, because either
+the line isn't under the robot or all three are on it. Comparing the sensors
+against each other rather than against a fixed brightness means there is nothing
+to calibrate per floor:
 
 ```python
-turn = robot.get_line(25)
-if turn is not None:
-    robot.steer(turn)           # follow the line
-else:
-    robot.stop()                # can't see it any more
+sensors = robot.read_line_sensors()
+darkest = min(sensors.values())
+brightest = max(sensors.values())
+
+if brightest - darkest < 50:
+    ...          # can't tell where the line is
+elif darkest == sensors["L"]:
+    robot.steerLeft(15)
 ```
 
-Negative means the line is off to the left, positive means right, 0 means dead
-centre — the same direction `steer()` uses, so it goes straight in with no minus
-sign to get the wrong way round. The `gain` is how hard to correct: bigger
-corrects harder, and the answer never leaves the wheels' −30…30 range, so turning
-it up too far simply stops helping instead of making `steer()` complain.
-
-Because the number grows with how far off the line the robot is, gentle drifts get
-gentle corrections. That's the difference between following a line and wobbling
-down it.
-
-`None` means the three sensors read too much alike to tell — either the line isn't
-under the robot, or all three are sitting on it. Always check for `None`; treating
-it as 0 drives the robot confidently off the track. `examples/line_follow.py` is a
-working follower that holds its angle briefly through gaps in the tape and gives
-up rather than driving off across the room.
-
-It compares the sensors against each other rather than against a fixed
-brightness, so there's nothing to calibrate for a particular floor or lighting.
+`examples/line_follow.py` is one working answer, with the numbers to play with at
+the top. It steers by a fixed amount whichever way the line drifts, which is why
+it wobbles — steering *in proportion* to how far off the line the robot is, using
+`steer()` with a calculated angle, is the obvious next step and is left as an
+exercise.
 
 `robot.checkLineSensors()` is worth two minutes on a robot you haven't used
 before. It asks you to cover one sensor at a time and says whether L, C and R
-match — if left and right are swapped, the follower steers the wrong way and
-wobbles harder the more it corrects, which looks exactly like badly chosen numbers
-rather than a wiring surprise.
+match — if left and right are swapped, a follower steers the wrong way and wobbles
+harder the more it corrects, which looks exactly like badly chosen numbers rather
+than a wiring surprise.
 
 Check what the sensors see before writing rules about the numbers:
 
 ```bash
-python3 -c "import roboshine as r; print(r.get_line_sensors())"
+python3 -c "import roboshine as r; print(r.read_line_sensors())"
 ```
 
 **Steering and driving are separate commands.** A curve is two steps: point the
@@ -456,10 +455,13 @@ steers like a car, so it can't spin on the spot.
 leaves it pointing up *and* left. `lookStraight()` resets both. Tilt is
 asymmetric because the mount is: 65° up, 35° down.
 
-**Nothing blocks except `wait()`.** `driveForward()` sets the motors going and
+**Nothing in roboshine pauses.** `driveForward()` sets the motors going and
 returns immediately, so the robot keeps driving until `stop()` — which is what
-lets a script watch a sensor while moving. Keeping the pauses in one obvious
-command is easier to reason about than commands that sometimes take time.
+lets a script watch a sensor while moving. The sensor readers don't pause either:
+`get_distance_cm()` respects the 60 ms an ultrasonic sensor needs between pings by
+*skipping* the ping and returning what it already knows, rather than sleeping
+inside somebody's steering loop. Pausing is `time.sleep()`'s job, which keeps the
+pauses in the student's own script where they can see them.
 
 Three more deliberate choices:
 
