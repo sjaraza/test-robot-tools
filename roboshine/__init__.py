@@ -16,6 +16,9 @@ Notes for anyone reading the code rather than using it:
 * Left/right and up/down are separate for the camera too, so lookLeft(40) then
   lookUp(20) leaves the camera pointing up and to the left. lookStraight()
   resets both.
+* steerLeft/steerRight/steerStraight all go through steer(), which is also what
+  records the angle for get_steer_angle(). Anything new that moves the steering
+  should call steer() rather than the servo directly, or that record goes stale.
 * Driving and steering are separate on purpose. driveForward() does not touch
   the steering, so steerLeft() then driveForward() curves left -- if driving
   straightened the wheels, the steer command would silently be undone.
@@ -34,13 +37,15 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.5"
+__version__ = "0.6"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
-    "steerLeft", "steerRight", "steerStraight",
+    "steer", "steerLeft", "steerRight", "steerStraight", "get_steer_angle",
     "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
-    "get_distance_cm", "get_line_sensors", "get_line_position",
+    "get_distance_cm",
+    "get_line_sensors", "get_line_position", "get_line_error", "get_line_dark",
+    "calibrate_line", "checkLineSensors",
     "wait", "showHelp",
 ]
 
@@ -60,6 +65,14 @@ PING_SPACING = 0.06
 PING_SAMPLES = 3
 
 _car = None
+
+# The steering angle roboshine last asked for. The picar-x servo can't be read
+# back, so this is the only way get_steer_angle() can answer at all.
+_steer_angle = 0
+
+# What the line and the floor read like, once calibrate_line() has been run.
+# None until then, and only get_line_dark() cares.
+_line_reference = None
 
 
 def _hardware():
@@ -178,6 +191,46 @@ def stop():
     _hardware().stop()
 
 
+def steer(angle):
+    """Point the front wheels at an exact angle. Negative is left, positive right.
+
+        steer(0)        straight ahead
+        steer(-20)      20 degrees left
+        steer(12)       12 degrees right
+
+    angle : -30 to 30.
+
+    This is the one to use when the number comes from a calculation rather than
+    from you -- following a line, say, where how hard to steer depends on how far
+    off the line the robot is:
+
+        error = get_line_error()             # -1 (line left) to +1 (line right)
+        if error is not None:
+            steer(error * 25)
+
+    steerLeft() and steerRight() are this with the sign built in.
+    """
+    global _steer_angle
+    _check_number(angle, "angle", -MAX_STEER, MAX_STEER)
+    _hardware().set_dir_servo_angle(int(angle))
+    _steer_angle = int(angle)
+
+
+def get_steer_angle():
+    """The angle the front wheels are pointing: -30 (left) to 30 (right).
+
+    This is what roboshine last asked for, not a reading from the servo -- the
+    picar-x can't report where its wheels actually are. It starts at 0, so a
+    script that steers only through this library gets a truthful answer.
+
+    Handy for changing the steering gradually, which wobbles far less than
+    jumping straight to a new angle:
+
+        steer(get_steer_angle() * 0.7 + wanted * 0.3)
+    """
+    return _steer_angle
+
+
 def steerLeft(degrees=MAX_STEER):
     """Point the front wheels left. Doesn't drive.
 
@@ -187,7 +240,7 @@ def steerLeft(degrees=MAX_STEER):
     degrees : 0 to 30, how far to turn. 30 is as far as the wheels go.
     """
     _check_number(degrees, "degrees", 0, MAX_STEER)
-    _hardware().set_dir_servo_angle(-int(degrees))
+    steer(-int(degrees))
 
 
 def steerRight(degrees=MAX_STEER):
@@ -199,12 +252,12 @@ def steerRight(degrees=MAX_STEER):
     degrees : 0 to 30, how far to turn. 30 is as far as the wheels go.
     """
     _check_number(degrees, "degrees", 0, MAX_STEER)
-    _hardware().set_dir_servo_angle(int(degrees))
+    steer(int(degrees))
 
 
 def steerStraight():
     """Point the front wheels straight ahead."""
-    _hardware().set_dir_servo_angle(0)
+    steer(0)
 
 
 def lookLeft(degrees=MAX_PAN):
@@ -341,6 +394,170 @@ def get_line_position(margin=LINE_MARGIN):
     return ("left", "centre", "right")[darkest]
 
 
+def get_line_error(margin=LINE_MARGIN):
+    """How far off the line the robot is: -1 (line to the left) to +1 (right).
+
+    0 means the line is under the middle sensor. Returns **None** when the
+    sensors can't tell -- check for that before using it:
+
+        error = get_line_error()
+        if error is not None:
+            steer(error * 25)                # steer harder the further off it is
+
+    This is the number that makes a smooth line follower possible. Deciding
+    'left or right' and turning a fixed amount always wobbles, because the robot
+    corrects just as hard for being slightly off as for being nearly lost.
+
+    Positive is deliberately the same direction as steer(): a line drifting right
+    gives a positive error, and steer() with a positive number turns right, so
+    steer(error * something) needs no minus sign to think about.
+
+    Worked out from how dark each sensor is relative to the brightest of the
+    three, so it needs no calibrating for your floor.
+    """
+    _check_number(margin, "margin", 0, 4096)
+    left, middle, right = get_line_sensors()
+    readings = (left, middle, right)
+
+    if max(readings) - min(readings) < margin:
+        return None                     # all three agree; nothing to steer by
+
+    # Lower numbers are darker, so "how dark" is the distance below the
+    # brightest reading. The brightest sensor scores 0 and drops out, which is
+    # what makes the sums below behave.
+    brightest = max(readings)
+    weights = [brightest - value for value in readings]
+    total = sum(weights)
+    if total == 0:
+        return None
+
+    # -1 for the left sensor, 0 for the middle, +1 for the right.
+    position = (-weights[0] + weights[2]) / total
+    return round(position, 3)
+
+
+def get_line_dark(margin=LINE_MARGIN):
+    """Which of the three sensors can see the line, as (left, middle, right).
+
+        left, middle, right = get_line_dark()
+        if left and middle and right:
+            print("a junction, or the finish line")
+        if not (left or middle or right):
+            print("off the track")
+
+    Each is True or False. This is the way to tell apart the two things
+    get_line_position() lumps together as 'lost' -- all three on a wide line or a
+    crossing, versus no line anywhere near the robot.
+
+    Without calibrate_line() it compares the sensors against each other, so all
+    three reading the same is reported as nothing dark, whether that's because
+    they're all on the tape or all on the floor. Run calibrate_line() once at the
+    start of your script and this can tell those apart properly.
+    """
+    _check_number(margin, "margin", 0, 4096)
+    readings = get_line_sensors()
+
+    if _line_reference is not None:
+        # Calibrated: compare each sensor against the halfway point between the
+        # line and the floor, which is an absolute answer per sensor.
+        line_value, floor_value = _line_reference
+        threshold = (line_value + floor_value) / 2
+        return tuple(value <= threshold for value in readings)
+
+    lowest, highest = min(readings), max(readings)
+    if highest - lowest < margin:
+        return (False, False, False)        # can't tell; see the docstring
+
+    halfway = lowest + (highest - lowest) / 2
+    return tuple(value < halfway for value in readings)
+
+
+def calibrate_line(seconds=5.0):
+    """Learn what the line and the floor read like on *this* floor.
+
+        calibrate_line()
+
+    Prints what to do, then watches the sensors for a few seconds while you slide
+    the robot slowly across the line and back. Whatever it sees darkest is taken
+    as the line and whatever is brightest as the floor.
+
+    Only get_line_dark() needs this, and only to tell a junction from being lost.
+    Everything else compares the sensors against each other and works without it.
+
+    Returns (line_reading, floor_reading). Held in memory for this script only,
+    so a script that wants it calls this each time it runs -- deliberately, since
+    a saved number from another room or another time of day is worse than none.
+    """
+    global _line_reference
+    _check_number(seconds, "seconds", 1, 60)
+
+    print("Calibrating the line sensors.")
+    print(f"Slide the robot slowly across the line and back for "
+          f"{seconds:g} seconds ...")
+
+    darkest = None
+    brightest = None
+    finish = time.monotonic() + seconds
+    while time.monotonic() < finish:
+        readings = get_line_sensors()
+        low, high = min(readings), max(readings)
+        darkest = low if darkest is None else min(darkest, low)
+        brightest = high if brightest is None else max(brightest, high)
+        time.sleep(0.02)
+
+    spread = brightest - darkest
+    print(f"  line reads about {darkest}, floor about {brightest}")
+
+    if spread < LINE_MARGIN:
+        print(f"  those are only {spread} apart, which is too close to tell the")
+        print("  line from the floor. Did the robot cross the line? Try again,")
+        print("  and check the sensors are pointing at the floor.")
+        _line_reference = None
+        return darkest, brightest
+
+    _line_reference = (darkest, brightest)
+    return darkest, brightest
+
+
+def checkLineSensors():
+    """Check the three sensors are the way round roboshine thinks they are.
+
+        checkLineSensors()
+
+    Asks you to cover one sensor at a time and reports what it saw. Worth two
+    minutes on a robot you haven't used before: if left and right are swapped,
+    a line follower steers the wrong way and wobbles harder the more it corrects,
+    which looks exactly like badly chosen numbers rather than a wiring surprise.
+
+    Returns True if all three matched, False otherwise.
+    """
+    names = ("left", "middle", "right")
+    good = True
+
+    print("Checking the line sensors. Keep the robot still.")
+    print("Cover one sensor at a time with a finger or something dark.\n")
+
+    for expected, name in enumerate(names):
+        input(f"  Cover the {name.upper()} sensor, then press Enter ... ")
+        readings = get_line_sensors()
+        darkest = readings.index(min(readings))
+
+        if darkest == expected:
+            print(f"    saw {name}      {readings}  ok\n")
+        else:
+            good = False
+            print(f"    saw {names[darkest]} instead of {name}   {readings}")
+            print("    ^ these two are the other way round\n")
+
+    if good:
+        print("All three match: (left, middle, right) is correct.")
+    else:
+        print("The sensors don't match their names. Everything that steers from")
+        print("them -- get_line_position(), get_line_error(), get_line_dark() --")
+        print("will be mirrored. Worth reporting before the robot is used.")
+    return good
+
+
 def wait(seconds):
     """Do nothing for a while. The robot keeps doing whatever it was doing.
 
@@ -376,6 +593,11 @@ roboshine {__version__} -- robot commands you can use in your own scripts
     steerStraight()           point them straight ahead
         degrees : 0 to 30. Steering does not drive; combine the two.
 
+    steer(angle)              exact angle: -30 is full left, 30 full right
+        For angles you calculate rather than type:
+          steer(get_line_error() * 25)
+    get_steer_angle()         the angle the wheels are pointing now
+
   CAMERA
     lookLeft(degrees=90)      turn the camera left
     lookRight(degrees=90)     turn it right
@@ -400,6 +622,27 @@ roboshine {__version__} -- robot commands you can use in your own scripts
           where = get_line_position()
           if where == 'left':  steerLeft(15)
 
+    get_line_error()
+        How far off the line, from -1 (line to the left) to +1 (to the right),
+        or None when the sensors can't tell. The smooth way to follow a line:
+          error = get_line_error()
+          if error is not None:  steer(error * 25)
+
+    get_line_dark()
+        Which sensors can see the line, as (left, middle, right) True/False.
+        Tells apart the two things 'lost' can mean:
+          left, middle, right = get_line_dark()
+          if left and middle and right:   print("junction")
+          if not (left or middle or right): print("off the track")
+
+    calibrate_line()
+        Learn what the line and floor read like on this floor. Only
+        get_line_dark() needs it, and only to spot junctions properly.
+
+    checkLineSensors()
+        Check left and right aren't the other way round. Worth doing once on
+        a robot you haven't used before.
+
   OTHER
     wait(seconds)     pause your script; the robot carries on
     showHelp()        print this
@@ -418,6 +661,17 @@ A whole script looks like this:
   while robot.get_distance_cm() > 20:    # drive until something is close
       robot.wait(0.1)
   robot.stop()
+
+Following a line smoothly is the same shape, steering by how far off it is:
+
+  robot.driveForward(15)
+  while True:
+      error = robot.get_line_error()     # -1 to +1, or None if it can't tell
+      if error is None:
+          robot.stop()
+          break
+      robot.steer(error * 25)            # bigger number = sharper corrections
+      robot.wait(0.05)
 
 Driving and steering are separate, so driveForward() keeps whatever steering you
 set. Commands return immediately; wait() is the only one that pauses. The motors

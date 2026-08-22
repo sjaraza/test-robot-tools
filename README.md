@@ -372,12 +372,18 @@ robot.stop()
 | `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
 | `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
 | `steerStraight()` | point them straight ahead |
+| `steer(angle)` | exact angle, −30 (full left) to 30 (full right) |
+| `get_steer_angle()` | the angle the wheels are pointing now |
 | `lookLeft(degrees=90)` / `lookRight(...)` | turn the camera, 0–90 |
 | `lookUp(degrees=65)` / `lookDown(degrees=35)` | tilt the camera |
 | `lookStraight()` | camera straight ahead and level |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
 | `get_line_sensors()` | the three sensors underneath as `(left, middle, right)` |
 | `get_line_position()` | `'left'`, `'centre'`, `'right'` or `'lost'` |
+| `get_line_error()` | −1 (line left) to +1 (line right), or `None` if it can't tell |
+| `get_line_dark()` | which sensors see the line, as `(left, middle, right)` booleans |
+| `calibrate_line()` | learn what the line and floor read like on this floor |
+| `checkLineSensors()` | check left and right aren't swapped |
 | `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
 
@@ -385,6 +391,7 @@ robot.stop()
 python3 -c "import roboshine; roboshine.showHelp()"
 python3 ~/test-robot-tools/examples/my_first_drive.py
 python3 ~/test-robot-tools/examples/line_follow.py
+python3 ~/test-robot-tools/examples/line_follow_smooth.py
 ```
 
 ### Line following
@@ -410,6 +417,57 @@ three sensors are sitting on it.
 
 `examples/line_follow.py` is a working follower, including giving up rather than
 driving off across the room when the line disappears for good.
+
+#### Following it smoothly
+
+Picking left or right and turning a fixed amount always wobbles: it corrects just
+as hard for being slightly off the line as for nearly losing it. `get_line_error()`
+gives *how far* off it is, from −1 to +1, which is what a real line follower
+steers by:
+
+```python
+error = robot.get_line_error()
+if error is not None:
+    robot.steer(error * 25)         # 25 = how sharply it corrects
+```
+
+Positive error and positive `steer()` are both to the right, so there's no minus
+sign to get the wrong way round. `None` means the sensors can't tell — check for
+it before doing arithmetic. `get_steer_angle()` lets you ease into a new angle
+rather than snapping to it:
+
+```python
+robot.steer(robot.get_steer_angle() * 0.6 + error * 25 * 0.4)
+```
+
+`examples/line_follow_smooth.py` is that, with the numbers to play with at the
+top.
+
+#### Junctions, and sensors the wrong way round
+
+`get_line_dark()` returns which sensors can see the line, which separates the two
+things `'lost'` lumps together:
+
+```python
+left, middle, right = robot.get_line_dark()
+if left and middle and right:
+    print("a junction, or the finish line")
+if not (left or middle or right):
+    print("off the track")
+```
+
+Telling "all three on the tape" from "all three on the floor" needs an absolute
+reference, so run `robot.calibrate_line()` once at the top of the script — it
+asks you to slide the robot across the line for a few seconds and remembers what
+each reads like. Without it, both cases report nothing dark. It's held in memory
+for that script only, on purpose: a number saved from another room or another
+time of day is worse than none.
+
+`robot.checkLineSensors()` is worth two minutes on a robot you haven't used
+before. It asks you to cover one sensor at a time and says whether they match
+their names — if left and right are swapped, every follower steers the wrong way
+and wobbles harder the more it corrects, which looks exactly like badly chosen
+numbers rather than a wiring surprise.
 
 Check what the sensors see before writing rules about the numbers:
 
