@@ -850,13 +850,18 @@ def any_key_watcher():
         yield lambda: read_key(0) is not None
 
 
-def live_view(title, sample, interval=0.15):
+def live_view(title, sample, interval=0.15, header=None):
     """Run `sample()` on a loop, showing one self-updating line.
 
     `sample` returns the text to display. Returning None ends the view.
+    `header` is an optional fixed row printed directly above that line, for
+    column labels. It has to be printed before the loop starts, because the
+    loop keeps overwriting the one line it owns.
     """
     print(f"\n  {title}")
     print(f"  {paint('press any key to stop', GREY)}\n")
+    if header is not None:
+        print("  " + header)
     with any_key_watcher() as pressed:
         try:
             while not pressed():
@@ -947,6 +952,10 @@ def measure_distance():
     return live_view("Distance  (median of 3 pings)", sample, interval=0.0)
 
 
+LINE_LABELS = ("L", "C", "R")   # picarx reports the floor sensors left to right
+LINE_COLUMN = 5                 # width each reading is padded to
+
+
 def line_sensors():
     px = car()
     if not hasattr(px, "get_grayscale_data"):
@@ -955,9 +964,21 @@ def line_sensors():
 
     def sample():
         values = px.get_grayscale_data()
-        return "  ".join(f"{paint(f'{v:5}', BOLD)}" for v in values)
+        return "  ".join(paint(f"{v:{LINE_COLUMN}}", BOLD) for v in values)
 
-    return live_view("Line sensors  (left  middle  right)", sample, interval=0.2)
+    def label(index):
+        if index < len(LINE_LABELS):
+            return LINE_LABELS[index]
+        return str(index + 1)
+
+    # Header built from a real reading, so the labels can't outnumber or fall
+    # short of the columns underneath them.
+    header = "  ".join(
+        paint(label(index).center(LINE_COLUMN), BOLD, CYAN)
+        for index in range(len(px.get_grayscale_data()))
+    )
+    return live_view("Line sensors  (L left · C centre · R right)", sample,
+                     interval=0.2, header=header)
 
 
 MAX_STEER = 30          # picarx steering limit, degrees either side
