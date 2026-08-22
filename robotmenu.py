@@ -985,6 +985,19 @@ MAX_STEER = 30          # picarx steering limit, degrees either side
 DEAD_MAN = 0.45         # seconds without a keypress before the motors cut
 
 
+# On these robots picarx's forward() drives the car backwards and backward()
+# drives it forwards -- the motors are wired mirrored to what the library
+# assumes. Rather than sprinkle that surprise through the menu, the two helpers
+# below are named for what the car actually does, and are the only place the
+# swap happens. Everything above them talks about real directions.
+def drive_forward(px, speed):
+    px.backward(speed)
+
+
+def drive_backward(px, speed):
+    px.forward(speed)
+
+
 def drive_arrows():
     """Arrow-key teleop with a dead-man stop.
 
@@ -1029,10 +1042,10 @@ def drive_arrows():
                 if key in ("q", "esc"):
                     break
                 elif key == "up":
-                    px.forward(speed)
+                    drive_forward(px, speed)
                     moving, last_command = "forward", now
                 elif key == "down":
-                    px.backward(speed)
+                    drive_backward(px, speed)
                     moving, last_command = "backward", now
                 elif key == "left":
                     angle = max(-MAX_STEER, angle - steer_step)
@@ -1094,7 +1107,7 @@ def drive():
     print(f"  {'backward' if backward else 'forward'} at {speed} "
           f"for {seconds}s ...")
     try:
-        px.backward(speed) if backward else px.forward(speed)
+        drive_backward(px, speed) if backward else drive_forward(px, speed)
         time.sleep(seconds)
     except KeyboardInterrupt:
         print("\n  interrupted")

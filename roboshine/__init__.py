@@ -131,7 +131,11 @@ def _run(backward, speed):
     car = _hardware()
     # Deliberately does not touch the steering: whatever steerLeft/steerRight
     # last set stays set, so the two commands compose.
-    car.backward(speed) if backward else car.forward(speed)
+    #
+    # The calls look inverted because they are: on these robots picarx's
+    # forward() drives the car backwards. The names students see describe what
+    # the car really does, and this line is the only place that is untangled.
+    car.forward(speed) if backward else car.backward(speed)
 
 
 def driveForward(speed=10):
