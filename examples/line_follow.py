@@ -12,15 +12,17 @@ and run:
 
     python3 -c "import roboshine as r; print(r.get_line_sensors())"
 
-The number under the line should be clearly lower than the other two. If all
-three look the same, the line isn't under the sensors -- move the robot.
+The reading under the line should be clearly lower than the other two -- lower
+means darker. If all three look the same, the line isn't under the sensors, so
+move the robot.
 """
 
 import roboshine as robot
 
 SPEED = 15          # slow. A fast line follower overshoots every corner.
-TURN = 15           # how hard to steer when the line drifts to one side
+GAIN = 25           # how hard to steer. The number worth playing with
 CHECK_EVERY = 0.05  # seconds between looks at the sensors
+LOST_LIMIT = 20     # about a second of seeing nothing before giving up
 
 print("Following the line. Ctrl-C to stop.")
 print("Put the robot on the line before it starts moving.")
@@ -33,28 +35,27 @@ lost_count = 0
 
 try:
     while True:
-        where = robot.get_line_position()
+        turn = robot.get_line(GAIN)
 
-        if where == "left":
-            robot.steerLeft(TURN)
-            lost_count = 0
-
-        elif where == "right":
-            robot.steerRight(TURN)
-            lost_count = 0
-
-        elif where == "centre":
-            robot.steerStraight()
-            lost_count = 0
-
-        else:
-            # 'lost' -- no sensor can pick the line out. Keep going briefly in
-            # case it's a gap in the tape, but stop if it stays lost, rather than
-            # driving off across the room.
+        if turn is None:
+            # None means the three sensors read too much alike to tell where the
+            # line is. Keep the last steering angle for a moment in case it's a
+            # gap in the tape, rather than stopping at every join.
             lost_count += 1
-            if lost_count > 20:            # about one second
-                print("Lost the line. Stopping.")
+            if lost_count > LOST_LIMIT:
+                print("\nLost the line. Stopping.")
                 break
+        else:
+            lost_count = 0
+
+            # turn is negative when the line is off to the left and positive when
+            # it's off to the right -- the same direction steer() uses, so it goes
+            # straight in with no minus sign to get the wrong way round. The
+            # further off the line, the bigger the number, so gentle drifts get
+            # gentle corrections.
+            robot.steer(turn)
+
+            print(f"steer {turn:+6.1f}°   ", end="\r")
 
         robot.wait(CHECK_EVERY)
 
@@ -65,9 +66,13 @@ robot.stop()
 robot.steerStraight()
 
 # Things to try:
-#   * raise SPEED and see where it starts overshooting corners
-#   * raise TURN for sharper corrections -- too high and it wobbles
+#   * raise GAIN until it starts wobbling, then back off a little -- that's about
+#     as hard as it can correct on your floor
+#   * raise SPEED once the steering looks steady
 #   * lower CHECK_EVERY so it reacts more often
-#   * print(robot.get_line_sensors()) inside the loop to watch the numbers
+#   * watch the numbers behind the steering:
+#       print(robot.get_line_sensors(), robot.get_line())
+#   * ease into the new angle instead of jumping to it, which wobbles less:
+#       robot.steer(robot.get_steer_angle() * 0.6 + turn * 0.4)
 #   * stop when something is in the way too:
-#       if robot.get_distance_cm() > 0 and robot.get_distance_cm() < 15: break
+#       if 0 < robot.get_distance_cm() < 15: break

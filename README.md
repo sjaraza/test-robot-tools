@@ -378,12 +378,9 @@ robot.stop()
 | `lookUp(degrees=65)` / `lookDown(degrees=35)` | tilt the camera |
 | `lookStraight()` | camera straight ahead and level |
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
-| `get_line_sensors()` | the three sensors underneath as `(left, middle, right)` |
-| `get_line_position()` | `'left'`, `'centre'`, `'right'` or `'lost'` |
-| `get_line_error()` | −1 (line left) to +1 (line right), or `None` if it can't tell |
-| `get_line_dark()` | which sensors see the line, as `(left, middle, right)` booleans |
-| `calibrate_line()` | learn what the line and floor read like on this floor |
-| `checkLineSensors()` | check left and right aren't swapped |
+| `get_line_sensors()` | the three sensors underneath as `{'L': …, 'C': …, 'R': …}` |
+| `get_line(gain=1)` | where the line is: −ve left, +ve right, `None` if it can't tell |
+| `checkLineSensors()` | check L and R aren't swapped |
 | `wait(seconds)` | pause the script while the robot carries on |
 | `showHelp()` | print all of the above |
 
@@ -391,83 +388,58 @@ robot.stop()
 python3 -c "import roboshine; roboshine.showHelp()"
 python3 ~/test-robot-tools/examples/my_first_drive.py
 python3 ~/test-robot-tools/examples/line_follow.py
-python3 ~/test-robot-tools/examples/line_follow_smooth.py
 ```
 
 ### Line following
 
-`get_line_position()` reports which of the three sensors can see the line, so a
-first line follower is a handful of lines:
+Two functions, and only one of them is needed to follow a line.
+
+`get_line_sensors()` is the raw look at what's underneath — a dict, keyed the same
+way as the `L C R` labels in the cockpit, so there's no order to remember:
 
 ```python
-where = robot.get_line_position()
-if where == 'left':
-    robot.steerLeft(15)
-elif where == 'right':
-    robot.steerRight(15)
+sensors = robot.get_line_sensors()
+print(sensors)                  # {'L': 812, 'C': 240, 'R': 795}
+print(sensors["C"])             # just the middle one
+```
+
+Lower means darker, so the sensor over a black line reads lower than the two on
+the floor.
+
+`get_line(gain)` turns those three numbers into one number to steer by:
+
+```python
+turn = robot.get_line(25)
+if turn is not None:
+    robot.steer(turn)           # follow the line
 else:
-    robot.steerStraight()
+    robot.stop()                # can't see it any more
 ```
 
-It works out which sensor is *darkest* rather than comparing against a fixed
+Negative means the line is off to the left, positive means right, 0 means dead
+centre — the same direction `steer()` uses, so it goes straight in with no minus
+sign to get the wrong way round. The `gain` is how hard to correct: bigger
+corrects harder, and the answer never leaves the wheels' −30…30 range, so turning
+it up too far simply stops helping instead of making `steer()` complain.
+
+Because the number grows with how far off the line the robot is, gentle drifts get
+gentle corrections. That's the difference between following a line and wobbling
+down it.
+
+`None` means the three sensors read too much alike to tell — either the line isn't
+under the robot, or all three are sitting on it. Always check for `None`; treating
+it as 0 drives the robot confidently off the track. `examples/line_follow.py` is a
+working follower that holds its angle briefly through gaps in the tape and gives
+up rather than driving off across the room.
+
+It compares the sensors against each other rather than against a fixed
 brightness, so there's nothing to calibrate for a particular floor or lighting.
-When all three readings are within about 50 of each other it reports `'lost'`
-instead of guessing — that means either the line isn't under the robot, or all
-three sensors are sitting on it.
-
-`examples/line_follow.py` is a working follower, including giving up rather than
-driving off across the room when the line disappears for good.
-
-#### Following it smoothly
-
-Picking left or right and turning a fixed amount always wobbles: it corrects just
-as hard for being slightly off the line as for nearly losing it. `get_line_error()`
-gives *how far* off it is, from −1 to +1, which is what a real line follower
-steers by:
-
-```python
-error = robot.get_line_error()
-if error is not None:
-    robot.steer(error * 25)         # 25 = how sharply it corrects
-```
-
-Positive error and positive `steer()` are both to the right, so there's no minus
-sign to get the wrong way round. `None` means the sensors can't tell — check for
-it before doing arithmetic. `get_steer_angle()` lets you ease into a new angle
-rather than snapping to it:
-
-```python
-robot.steer(robot.get_steer_angle() * 0.6 + error * 25 * 0.4)
-```
-
-`examples/line_follow_smooth.py` is that, with the numbers to play with at the
-top.
-
-#### Junctions, and sensors the wrong way round
-
-`get_line_dark()` returns which sensors can see the line, which separates the two
-things `'lost'` lumps together:
-
-```python
-left, middle, right = robot.get_line_dark()
-if left and middle and right:
-    print("a junction, or the finish line")
-if not (left or middle or right):
-    print("off the track")
-```
-
-Telling "all three on the tape" from "all three on the floor" needs an absolute
-reference, so run `robot.calibrate_line()` once at the top of the script — it
-asks you to slide the robot across the line for a few seconds and remembers what
-each reads like. Without it, both cases report nothing dark. It's held in memory
-for that script only, on purpose: a number saved from another room or another
-time of day is worse than none.
 
 `robot.checkLineSensors()` is worth two minutes on a robot you haven't used
-before. It asks you to cover one sensor at a time and says whether they match
-their names — if left and right are swapped, every follower steers the wrong way
-and wobbles harder the more it corrects, which looks exactly like badly chosen
-numbers rather than a wiring surprise.
+before. It asks you to cover one sensor at a time and says whether L, C and R
+match — if left and right are swapped, the follower steers the wrong way and
+wobbles harder the more it corrects, which looks exactly like badly chosen numbers
+rather than a wiring surprise.
 
 Check what the sensors see before writing rules about the numbers:
 
