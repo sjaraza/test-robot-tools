@@ -985,17 +985,37 @@ MAX_STEER = 30          # picarx steering limit, degrees either side
 DEAD_MAN = 0.45         # seconds without a keypress before the motors cut
 
 
-# On these robots picarx's forward() drives the car backwards and backward()
-# drives it forwards -- the motors are wired mirrored to what the library
-# assumes. Rather than sprinkle that surprise through the menu, the two helpers
-# below are named for what the car actually does, and are the only place the
-# swap happens. Everything above them talks about real directions.
+# Whether picarx's forward() drives this particular car backwards depends on which
+# way round the motor wires were pushed on when it was built, so it's a per-robot
+# setting rather than something the code can know. The setting lives in
+# ~/.roboshine.json and is shared with roboshine, so flipping it here fixes the
+# student's own scripts too -- one file, one meaning, no drift.
+#
+# Imported from roboshine rather than reimplemented: the cockpit otherwise talks
+# to picarx directly, but two opinions about one config file is how a robot ends
+# up driving one way from the menu and the other way from a script.
+try:
+    from roboshine import _config as robot_config
+except ImportError:                     # roboshine not on the path yet
+    robot_config = None
+
+
+def drive_flipped():
+    """True when forward and reverse need swapping on this robot."""
+    if robot_config is None:
+        return True                     # what the checked robots needed
+    robot_config.forget()               # a student's script may have changed it
+    return robot_config.drive_flipped()
+
+
+# The two helpers below are named for what the car actually does, and are the only
+# place the swap is applied. Everything above them talks about real directions.
 def drive_forward(px, speed):
-    px.backward(speed)
+    px.backward(speed) if drive_flipped() else px.forward(speed)
 
 
 def drive_backward(px, speed):
-    px.forward(speed)
+    px.forward(speed) if drive_flipped() else px.backward(speed)
 
 
 def drive_arrows():
@@ -1385,6 +1405,44 @@ def stop_everything():
     print("\n  stopped, wheels straightened")
 
 
+def flip_drive():
+    """Swap forward and reverse for this robot, and remember it.
+
+    Not a preference: the two motor wires can go on either way round when the kit
+    is built, and nothing on the robot can report which way they went. So each
+    robot needs telling once, and the answer belongs with the robot rather than in
+    the code. Shared with roboshine, so a student's own scripts drive the same way
+    the menu does.
+    """
+    if robot_config is None:
+        print("\n  can't save the setting: roboshine isn't importable")
+        print("  fix it with:  bash ~/test-robot-tools/install.sh")
+        return False
+
+    flipped = drive_flipped()
+    state = paint("swapped", BOLD, YELLOW) if flipped else paint("normal", BOLD, GREEN)
+    print(f"\n  Forward / reverse is currently {state}.")
+    print("  Press ↑ in item 1 and see which way the robot goes. If it goes the")
+    print("  wrong way, swap it here.")
+
+    answer = ask(f"  swap it {'back to normal' if flipped else 'over'}? [y/N]: ", "n")
+    if answer is None or not answer.lower().startswith("y"):
+        print("  left as it was")
+        return False
+
+    try:
+        robot_config.set_drive_flipped(not flipped)
+    except OSError as exc:
+        print(paint(f"  couldn't save it: {exc}", RED))
+        return False
+
+    now = "swapped" if not flipped else "normal"
+    print(f"  forward / reverse is now {paint(now, BOLD)}")
+    print(f"  saved in {robot_config.CONFIG_PATH}")
+    print("  your own scripts will use this too -- try item 1 to check")
+    return False
+
+
 def show_probe():
     print()
     probe()
@@ -1401,6 +1459,7 @@ MENU = [
     ("Camera logs", show_camera_log),
     ("Stop everything", stop_everything),
     ("Diagnostics", show_probe),
+    ("Flip forward / reverse", flip_drive),
 ]
 
 

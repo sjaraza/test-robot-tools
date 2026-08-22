@@ -126,11 +126,20 @@ undervoltage/throttling warnings. `r` refreshes it.
 │   8  Camera logs                                 │
 │   9  Stop everything                             │
 │  10  Diagnostics                                 │
+│  11  Flip forward / reverse                      │
 │   r  Refresh    q  Quit                          │
 ╰──────────────────────────────────────────────────╯
 ```
 
 Motors are always stopped on the way out of an action, including on Ctrl-C.
+
+**Item 11 flips forward and reverse**, for a robot whose motors drive the wrong
+way. The two motor wires can go on either way round when the kit is built and
+nothing on the robot can report which way they went, so each robot needs telling
+once. The setting is saved in `~/.roboshine.json` and **shared with roboshine**, so
+flipping it in the menu fixes the student's own scripts at the same time — one
+file, one meaning. Item 1 is the quickest way to check: press ↑ and see which way
+the robot goes.
 
 Arrow-key driving and pan/tilt both ask for a step size first, and driving has a
 0.45s dead-man stop: a terminal has no key-release event, so the motors cut when
@@ -381,10 +390,28 @@ robot.stop()
 | `get_distance_cm()` | centimetres to the thing in front, or −1 if nothing is in range |
 | `read_line_sensors()` | the three sensors underneath as `{'L': …, 'C': …, 'R': …}` |
 | `checkLineSensors()` | check L and R aren't swapped |
+| `flipDrive()` | swap forward and reverse for this robot, and remember it |
+| `is_drive_flipped()` | whether they're currently swapped |
 | `showHelp()` | print all of the above |
 
 To pause, use Python's own `time.sleep(seconds)` — roboshine deliberately has no
 pause of its own.
+
+### If your robot drives the wrong way
+
+```python
+robot.flipDrive()
+```
+
+Run it once. The two motor wires can go on either way round when the kit is built,
+and nothing on the robot can tell which way they went — so a robot may well be
+wired the opposite way to the one next to it. The setting is saved in
+`~/.roboshine.json`, applies to **every script you write from then on**, and is the
+same setting the cockpit's item 11 changes. Run it again to swap back.
+
+This is deliberately a per-robot setting rather than a constant in the code: the
+alternative was every student with mirrored motors editing the library, and every
+student without them getting a robot that drives backwards.
 
 ```bash
 python3 -c "import roboshine; roboshine.showHelp()"

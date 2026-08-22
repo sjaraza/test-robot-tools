@@ -49,13 +49,16 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-__version__ = "0.8"
+from . import _config
+
+__version__ = "0.9"
 
 __all__ = [
     "driveForward", "driveBack", "stop",
     "steer", "steerLeft", "steerRight", "steerStraight", "get_steer_angle",
     "lookLeft", "lookRight", "lookUp", "lookDown", "lookStraight",
     "get_distance_cm", "read_line_sensors", "checkLineSensors",
+    "flipDrive", "is_drive_flipped",
     "showHelp",
 ]
 
@@ -160,13 +163,17 @@ def _run(backward, speed):
     """Shared body of driveForward and driveBack."""
     speed = int(_check_number(speed, "speed", 0, 100))
     car = _hardware()
+
+    # Which way round the motor wires were pushed on decides whether picarx's
+    # forward() actually drives this car forwards, so it's a per-robot setting
+    # rather than something the library can know. flipDrive() changes it, and
+    # this is the only place it is applied.
+    if _config.drive_flipped():
+        backward = not backward
+
     # Deliberately does not touch the steering: whatever steerLeft/steerRight
     # last set stays set, so the two commands compose.
-    #
-    # The calls look inverted because they are: on these robots picarx's
-    # forward() drives the car backwards. The names students see describe what
-    # the car really does, and this line is the only place that is untangled.
-    car.forward(speed) if backward else car.backward(speed)
+    car.backward(speed) if backward else car.forward(speed)
 
 
 def driveForward(speed=10):
@@ -422,6 +429,44 @@ def read_line_sensors():
     return {"L": left, "C": centre, "R": right}
 
 
+def is_drive_flipped():
+    """True when this robot needs its forward and reverse swapped over.
+
+    A setting rather than a fact about all robots: which way round the two motor
+    wires were pushed on when the kit was built decides it, so it varies from
+    robot to robot. flipDrive() changes it.
+    """
+    _config.forget()             # another process may have changed it
+    return _config.drive_flipped()
+
+
+def flipDrive():
+    """Swap forward and reverse on this robot, and remember it.
+
+        flipDrive()
+
+    Run this once if driveForward() drives your robot *backwards*. The setting is
+    saved in ~/.roboshine.json, so it applies to every script you write from then
+    on -- your robot, not just this program. Run it again to swap back.
+
+    The reason it's needed: the two motor wires can go on either way round, and
+    nothing on the robot can tell which way they went. Your robot may well be
+    wired the opposite way to the one next to it.
+
+    Returns True if forward and reverse are now swapped.
+    """
+    flipped = not is_drive_flipped()
+    _config.set_drive_flipped(flipped)
+
+    if flipped:
+        print("Forward and reverse are now swapped over.")
+    else:
+        print("Forward and reverse are back to normal.")
+    print(f"Saved in {_config.CONFIG_PATH} -- every script you write will use it.")
+    print("Check with a short driveForward(15) and see which way it goes.")
+    return flipped
+
+
 def checkLineSensors():
     """Check the three sensors are the way round roboshine thinks they are.
 
@@ -521,6 +566,15 @@ roboshine {__version__} -- robot commands you can use in your own scripts
     checkLineSensors()
         Check L and R aren't the other way round. Worth doing once on a robot
         you haven't used before. This one waits for you to press Enter.
+
+  YOUR ROBOT
+    flipDrive()
+        Swap forward and reverse, if driveForward() drives yours backwards.
+        The two motor wires can go on either way round and nothing can tell
+        which way they went, so this varies from robot to robot. Saved for
+        every script you write from now on -- the cockpit's item 11 does the
+        same thing.
+    is_drive_flipped()        True if they're currently swapped
 
   OTHER
     showHelp()        print this
