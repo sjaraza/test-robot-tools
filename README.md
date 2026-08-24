@@ -362,13 +362,13 @@ import time
 import roboshine as robot
 
 robot.steerLeft(20)          # point the wheels
-robot.driveForward(20)       # start moving, curving left
+robot.driveForward(200)      # start moving, curving left
 time.sleep(2)                # ...for two seconds
 robot.stop()
 
 # Nothing in roboshine pauses, so you can watch a sensor while driving:
 robot.steerStraight()
-robot.driveForward(15)
+robot.driveForward(150)
 while robot.get_distance_cm() > 25:
     time.sleep(0.1)
 robot.stop()
@@ -376,10 +376,10 @@ robot.stop()
 
 | Command | What it does |
 |---|---|
-| `driveForward(speed=10)` | start driving forward; keeps going until `stop()` |
-| `driveBack(speed=10)` | start driving backward; keeps going until `stop()` |
+| `driveForward(speed=200)` | start driving forward; keeps going until `stop()` |
+| `driveBack(speed=200)` | start driving backward; keeps going until `stop()` |
 | `stop()` | stop the motors; wheels stay pointed where they were |
-| `setWheels(left, right)` | the two back wheels separately, −100…100 each |
+| `setWheels(left, right)` | the two back wheels separately, −1000…1000 each |
 | `steerLeft(degrees=30)` | point the wheels left, 0–30. Doesn't drive |
 | `steerRight(degrees=30)` | point the wheels right, 0–30. Doesn't drive |
 | `steerStraight()` | point them straight ahead |
@@ -398,18 +398,47 @@ robot.stop()
 To pause, use Python's own `time.sleep(seconds)` — roboshine deliberately has no
 pause of its own.
 
+### Speed is 0–1000, not 0–100
+
+`driveForward(1)` really is a crawl. That needs saying because picarx's own scale
+doesn't work that way:
+
+```python
+if speed != 0:
+    speed = int(speed / 2) + 50      # picarx/picarx.py
+```
+
+picarx maps *every* non-zero speed onto **50–100% motor power**, so its slowest
+possible speed is half throttle — on a geared 8.4V robot, faster than anyone wants
+for a first drive, with nothing slower available at any input. roboshine sets the
+PWM duty directly instead (`roboshine/_motor.py`), which opens up the half of the
+range picarx never exposed, and uses 1000 steps because once the bottom is
+genuinely slow, 100 steps makes "a bit slower" a visible jump.
+
+So `driveForward(200)` — the default — is gentler than the old `driveForward(10)`
+was, and `driveForward(1)` is about as slow as the motors will turn at all.
+
+Below roughly 25% duty a geared motor hums without moving, and where that line
+falls depends on the gearbox, the floor and the battery. Speed 1 maps to 25% by
+default; if the robots need more to get going, raise it per robot rather than
+leaving students to discover that low numbers do nothing:
+
+```json
+{"drive_flipped": true, "min_duty": 35}
+```
+
 ### One wheel at a time
 
 `driveForward()` drives both back wheels together. `setWheels()` drives them
 separately:
 
 ```python
-robot.setWheels(30, 30)     # both forwards — same as driveForward(30)
-robot.setWheels(30, 0)      # left wheel only: a slow arc to the right
-robot.setWheels(-20, 20)    # the two wheels pushing against each other
+robot.setWheels(300, 300)   # both forwards — same as driveForward(300)
+robot.setWheels(300, 0)     # left wheel only: a slow arc to the right
+robot.setWheels(-200, 200)  # the two wheels pushing against each other
 ```
 
-−100…100 each, positive being forwards for that wheel. It returns immediately like
+−1000…1000 each, positive being forwards for that wheel. It returns immediately like
 the other drive commands, leaves the front wheels wherever they were steered, and
 respects `flipDrive()` — so "forwards" means the same thing here as everywhere
 else.
@@ -420,7 +449,7 @@ Underneath, picarx numbers the motors 1 and 2 and mounts them mirror-image: its 
 about which way a motor faces.
 
 **It steers like a car, not a tank.** The front wheels are pointed wherever the
-servo left them and can't slide sideways, so `setWheels(30, -30)` doesn't spin the
+servo left them and can't slide sideways, so `setWheels(300, -300)` doesn't spin the
 robot neatly on the spot — it scrubs, pulls a lot of current, and how it turns
 depends mostly on how slippery the floor is. Worth watching once; don't hold it
 there. An arc with one wheel stopped behaves far better.

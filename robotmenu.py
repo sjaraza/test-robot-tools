@@ -996,8 +996,16 @@ DEAD_MAN = 0.45         # seconds without a keypress before the motors cut
 # up driving one way from the menu and the other way from a script.
 try:
     from roboshine import _config as robot_config
+    from roboshine import _motor as robot_motor
+    MAX_SPEED = robot_motor.SPEED_MAX
 except ImportError:                     # roboshine not on the path yet
     robot_config = None
+    robot_motor = None
+    MAX_SPEED = 1000
+
+# How much + and - move the speed while driving. A twentieth of the range, so it
+# takes the same number of presses to cross it as it always did.
+SPEED_STEP = MAX_SPEED // 20
 
 
 def drive_flipped():
@@ -1011,11 +1019,28 @@ def drive_flipped():
 # The two helpers below are named for what the car actually does, and are the only
 # place the swap is applied. Everything above them talks about real directions.
 def drive_forward(px, speed):
-    px.backward(speed) if drive_flipped() else px.forward(speed)
+    _drive(px, speed)
 
 
 def drive_backward(px, speed):
-    px.forward(speed) if drive_flipped() else px.backward(speed)
+    _drive(px, -speed)
+
+
+def _drive(px, speed):
+    """Both wheels at `speed` on the 0-MAX_SPEED scale; negative is backwards.
+
+    Goes through roboshine's motor code rather than picarx's forward()/backward()
+    so that the menu and a student's own script drive at the same speed for the
+    same number -- picarx's own scale can't go below half power.
+    """
+    if robot_motor is None:             # roboshine missing: coarse but driving
+        picarx_speed = int(abs(speed) / MAX_SPEED * 100)
+        if (speed < 0) != drive_flipped():
+            px.backward(picarx_speed)
+        else:
+            px.forward(picarx_speed)
+        return
+    robot_motor.drive(px, speed, speed, flipped=drive_flipped())
 
 
 def drive_arrows():
@@ -1032,7 +1057,7 @@ def drive_arrows():
         return False
 
     print("\n  Drive with the arrow keys.")
-    speed = ask_number("  speed (0-100) [10]: ", 0, 100, 10)
+    speed = ask_number(f"  speed (0-{MAX_SPEED}) [200]: ", 0, MAX_SPEED, 200)
     if speed is None:
         return False
     steer_step = ask_number("  steer step in degrees (1-15) [1]: ", 1, 15, 1)
@@ -1080,9 +1105,9 @@ def drive_arrows():
                     px.stop()
                     moving = None
                 elif key in ("+", "="):
-                    speed = min(100, speed + 5)
+                    speed = min(MAX_SPEED, speed + SPEED_STEP)
                 elif key in ("-", "_"):
-                    speed = max(0, speed - 5)
+                    speed = max(0, speed - SPEED_STEP)
 
                 # Dead-man: no fresh command recently means stop.
                 if moving and now - last_command > DEAD_MAN:
@@ -1095,7 +1120,7 @@ def drive_arrows():
                 # the same whether the step is 1 degree or 15.
                 marks = round(abs(angle) / MAX_STEER * 6)
                 wheel = (("◀" * marks) if angle < 0 else ("▶" * marks)) or "•"
-                status_line(f"  {state:<20} speed {paint(f'{speed:3}', BOLD)}   "
+                status_line(f"  {state:<20} speed {paint(f'{speed:4}', BOLD)}   "
                             f"steer {paint(f'{angle:+3}', BOLD)}° "
                             f"{paint(wheel, CYAN)}")
     except KeyboardInterrupt:
@@ -1117,7 +1142,7 @@ def drive():
     if direction is None:
         return
     backward = direction.lower().startswith("b")
-    speed = ask_number("  speed (0-100) [30]: ", 0, 100, 30)
+    speed = ask_number(f"  speed (0-{MAX_SPEED}) [300]: ", 0, MAX_SPEED, 300)
     if speed is None:
         return
     seconds = ask_number("  seconds (1-10) [2]: ", 1, 10, 2)

@@ -24,7 +24,8 @@ import time
 
 import roboshine as robot
 
-SPEED = 15          # slow. A fast line follower overshoots every corner.
+SPEED = 150         # slow. A fast line follower overshoots every corner.
+                    # 0 to 1000; try 80 if it still overshoots
 TURN = 15           # how hard to steer when the line drifts to one side
 MARGIN = 50         # how different the readings must be to count as seeing a line
 CHECK_EVERY = 0.05  # seconds between looks at the sensors

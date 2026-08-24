@@ -49,9 +49,9 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-from . import _config
+from . import _config, _motor
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 __all__ = [
     "driveForward", "driveBack", "setWheels", "stop",
@@ -64,6 +64,10 @@ __all__ = [
 
 # picarx steering limit, degrees either side of straight.
 MAX_STEER = 30
+
+# The speed scale students use. Not picarx's 0-100: that maps onto 50-100% motor
+# power, so its slowest speed is half throttle. See roboshine/_motor.py.
+MAX_SPEED = _motor.SPEED_MAX
 
 # Camera limits. Tilt is deliberately asymmetric -- the mount can look further up
 # than down, and pretending otherwise would just make lookDown(60) fail oddly.
@@ -161,33 +165,37 @@ def _check_number(value, name, low, high):
 
 def _run(backward, speed):
     """Shared body of driveForward and driveBack."""
-    speed = int(_check_number(speed, "speed", 0, 100))
+    speed = _check_number(speed, "speed", 0, MAX_SPEED)
     car = _hardware()
-
-    # Which way round the motor wires were pushed on decides whether picarx's
-    # forward() actually drives this car forwards, so it's a per-robot setting
-    # rather than something the library can know. flipDrive() changes it, and
-    # this is the only place it is applied.
-    if _config.drive_flipped():
-        backward = not backward
 
     # Deliberately does not touch the steering: whatever steerLeft/steerRight
     # last set stays set, so the two commands compose.
-    car.backward(speed) if backward else car.forward(speed)
+    #
+    # Both wheels get the same number. picarx eases the inner wheel in a turn;
+    # this doesn't, because which of its two motors is the inner one depends on a
+    # sign convention that can't be checked without a robot in front of you --
+    # and setWheels() is there for anyone who wants to try it deliberately.
+    wheel_speed = -speed if backward else speed
+    _motor.drive(car, wheel_speed, wheel_speed, flipped=_config.drive_flipped())
 
 
-def driveForward(speed=10):
+def driveForward(speed=200):
     """Start driving forwards, and keep going until stop() is called.
 
         driveForward()      gently
-        driveForward(30)    quicker
+        driveForward(600)   quicker
+        driveForward(1)     as slow as the motors will turn
 
-    speed : 0 to 100. Starts at 10, slow enough to watch.
+    speed : 0 to 1000. Starts at 200, slow enough to walk beside.
+
+    1 is genuinely a crawl and 1000 is flat out. There are a thousand steps
+    because the slow end is where the interesting driving happens -- 100 steps
+    would make "a bit slower" jump.
 
     Returns straight away -- the robot carries on while your script does other
     things, so you can watch a sensor while moving:
 
-        driveForward(20)
+        driveForward(200)
         while get_distance_cm() > 20:
             time.sleep(0.1)
         stop()
@@ -198,12 +206,14 @@ def driveForward(speed=10):
     _run(False, speed)
 
 
-def driveBack(speed=10):
+def driveBack(speed=200):
     """Start driving backwards, and keep going until stop() is called.
 
-        driveBack(20)
+        driveBack(200)
         time.sleep(1)
         stop()
+
+    speed : 0 to 1000, same scale as driveForward().
     """
     _run(True, speed)
 
@@ -211,11 +221,11 @@ def driveBack(speed=10):
 def setWheels(left, right):
     """Drive the two back wheels separately. The low-level one.
 
-        setWheels(30, 30)     both forwards -- same as driveForward(30)
-        setWheels(30, 0)      only the left wheel: a slow arc to the right
-        setWheels(-20, 20)    the two wheels pushing against each other
+        setWheels(300, 300)   both forwards -- same as driveForward(300)
+        setWheels(300, 0)     only the left wheel: a slow arc to the right
+        setWheels(-200, 200)  the two wheels pushing against each other
 
-    left, right : -100 to 100 each. Positive drives that wheel forwards,
+    left, right : -1000 to 1000 each. Positive drives that wheel forwards,
     negative backwards, 0 stops it.
 
     Like the other drive commands this returns immediately and keeps going until
@@ -223,33 +233,18 @@ def setWheels(left, right):
     It also respects flipDrive(), so "forwards" means the same thing here as
     everywhere else.
 
-    Worth knowing before you try setWheels(30, -30): this robot steers like a car,
+    Worth knowing before you try setWheels(300, -300): this robot steers like a car,
     not like a tank. The front wheels are pointed wherever the servo left them and
     can't slide sideways, so opposing the back wheels doesn't spin it neatly on the
     spot -- it scrubs, draws a lot of current, and how it turns depends mostly on
     how slippery the floor is. Fun to watch for a second; don't hold it there.
 
-    An arc with one wheel stopped, like setWheels(30, 0), works much better.
+    An arc with one wheel stopped, like setWheels(300, 0), works much better.
     """
-    _check_number(left, "left", -100, 100)
-    _check_number(right, "right", -100, 100)
+    _check_number(left, "left", -MAX_SPEED, MAX_SPEED)
+    _check_number(right, "right", -MAX_SPEED, MAX_SPEED)
 
-    car = _hardware()
-    setter = getattr(car, "set_motor_speed", None)
-    if setter is None:
-        raise RuntimeError(
-            "this robot's library has no per-wheel control "
-            "(picarx.set_motor_speed is missing)")
-
-    if _config.drive_flipped():
-        left, right = -left, -right
-
-    # picarx numbers the motors 1 and 2, and they are mounted mirror-image: its
-    # own forward() drives motor 1 positive and motor 2 negative to go straight.
-    # Undoing that here is the whole point of this function -- so that a student
-    # thinking about wheels doesn't have to think about which way a motor faces.
-    setter(1, int(left))
-    setter(2, int(-right))
+    _motor.drive(_hardware(), left, right, flipped=_config.drive_flipped())
 
 
 def stop():
@@ -560,23 +555,24 @@ def showHelp():
 roboshine {__version__} -- robot commands you can use in your own scripts
 
   DRIVING
-    driveForward(speed=10)
-    driveBack(speed=10)
-        speed : 0 to 100
+    driveForward(speed=200)
+    driveBack(speed=200)
+        speed : 0 to 1000. 1 is a crawl, 1000 is flat out.
         These start the motors and return immediately. The robot keeps going
         until you call stop().
         Examples:
           driveForward()      gently
-          driveForward(30)    quicker
+          driveForward(600)   quicker
+          driveForward(1)     as slow as the motors will turn
 
     stop()
         Stop the motors. The wheels stay pointed where they were.
 
     setWheels(left, right)
-        The two back wheels separately, -100 to 100 each. Positive is forwards.
-          setWheels(30, 30)     both forwards, same as driveForward(30)
-          setWheels(30, 0)      left wheel only: a slow arc to the right
-        It steers like a car, not a tank, so setWheels(30, -30) scrubs and
+        The two back wheels separately, -1000 to 1000 each. Positive is forwards.
+          setWheels(300, 300)   both forwards, same as driveForward(300)
+          setWheels(300, 0)     left wheel only: a slow arc to the right
+        It steers like a car, not a tank, so setWheels(300, -300) scrubs and
         fights itself rather than spinning neatly. Look, don't hold.
 
   STEERING
@@ -638,12 +634,12 @@ A whole script looks like this:
   import roboshine as robot
 
   robot.steerLeft(20)
-  robot.driveForward(20)     # starts moving, curving left
+  robot.driveForward(200)    # starts moving, curving left
   time.sleep(2)              # ...for two seconds
   robot.stop()
 
   robot.steerStraight()
-  robot.driveForward(20)
+  robot.driveForward(200)
   while robot.get_distance_cm() > 20:    # drive until something is close
       time.sleep(0.1)
   robot.stop()

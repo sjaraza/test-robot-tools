@@ -20,19 +20,19 @@ print(f"There is {space} cm in front of me.")
 
 if space < 0:
     print("Nothing close enough to measure -- plenty of room.")
-    robot.driveForward(20)
+    robot.driveForward(200)
     time.sleep(2)
     robot.stop()
 
 elif space < 20:
     print("Something is close. Backing up instead.")
-    robot.driveBack(20)
+    robot.driveBack(200)
     time.sleep(1)
     robot.stop()
 
 else:
     print("Room to move. Driving forward, then curving left.")
-    robot.driveForward(20)
+    robot.driveForward(200)
     time.sleep(2)
 
     # Steering and driving are separate commands, so a curve is two steps:
@@ -56,14 +56,15 @@ print("Done.")
 # No robot command pauses -- pausing is time.sleep()'s job -- so your script can
 # watch while the robot keeps moving:
 #
-#   robot.driveForward(15)
+#   robot.driveForward(150)
 #   while robot.get_distance_cm() > 25:
 #       time.sleep(0.1)
 #   robot.stop()
 #   print("Stopped because something got close.")
 #
 # Things to try:
-#   * change the speeds and the sleep times
+#   * change the speeds and the sleep times -- speed is 0 to 1000, and 1
+#     really is a crawl
 #   * curve the other way with steerRight(20)
 #   * a gentler curve: steerLeft(10) instead of steerLeft(20)
 #   * uncomment the loop above and drive it at a wall
