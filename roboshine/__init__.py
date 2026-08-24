@@ -49,7 +49,7 @@ Notes for anyone reading the code rather than using it:
 import atexit
 import time
 
-from . import _config, _motor
+from . import _config, _motor, _sensors
 
 __version__ = "1.1"
 
@@ -75,17 +75,12 @@ MAX_PAN = 90
 MAX_TILT_UP = 65
 MAX_TILT_DOWN = 35
 
-# An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
-# and the echo from the previous ping arrives inside the next measurement window,
-# which reads as wildly wrong distances rather than as noise. get_distance_cm()
-# honours this by *not pinging* when it's called too soon, rather than by sleeping
-# -- sleeping would stall whatever loop the student wrote.
-PING_SPACING = 0.06
-PING_SAMPLES = 3
-
-# How long a distance reading is worth remembering. On a moving robot an older one
-# is a measurement of somewhere else.
-PING_MEMORY = 0.5
+# Ultrasonic timing, kept in _sensors so the cockpit's live view and this share
+# one set of rules. get_distance_cm() never sleeps: it skips the ping when the
+# sensor hasn't had its quiet time instead of waiting for it.
+PING_SPACING = _sensors.PING_SPACING
+PING_SAMPLES = _sensors.PING_SAMPLES
+PING_MEMORY = _sensors.PING_MEMORY
 
 _car = None
 
@@ -93,11 +88,8 @@ _car = None
 # back, so this is the only way get_steer_angle() can answer at all.
 _steer_angle = 0
 
-# Recent distance readings as (timestamp, centimetres), oldest first, and when the
-# sensor was last pinged. Kept here so get_distance_cm() can average over a loop's
-# worth of readings without ever pausing to collect them.
-_ping_history = []
-_last_ping_at = 0.0
+# Builds the distance median up across calls rather than inside one.
+_distance = _sensors.Distance()
 
 
 def _hardware():
@@ -380,56 +372,8 @@ def get_distance_cm(samples=PING_SAMPLES):
     think. The first call has only one reading to go on, so give it a few times
     round the loop before trusting a surprising number.
     """
-    global _last_ping_at
-
-    car = _hardware()
-    keep = max(1, int(samples))
-    now = time.monotonic()
-
-    # Only fire a fresh ping once the sensor has had its quiet time. Firing sooner
-    # doesn't just waste effort: the echo from the previous ping arrives inside
-    # this measurement window, which reads as a wildly wrong distance rather than
-    # as noise.
-    if now - _last_ping_at >= PING_SPACING:
-        _last_ping_at = now
-
-        value = None
-        for name in ("get_distance", "ultrasonic"):
-            target = getattr(car, name, None)
-            if target is None:
-                continue
-            value = target() if callable(target) else target.read()
-            break
-
-        if value is None:
-            raise RuntimeError("this robot has no ultrasonic sensor fitted")
-
-        # A reading of 0 or less means no echo came back. The ping still happened,
-        # so the timer above is right to have moved, but there's no distance to
-        # remember.
-        if value > 0:
-            _ping_history.append((now, float(value)))
-
-    # Readings go stale: on a moving robot a second-old distance is a distance
-    # from somewhere else. Dropping them is also what lets -1 mean "nothing in
-    # range" again once whatever was in front has gone. Keeping only the last
-    # `keep` of what survives is what makes the median a median of recent pings.
-    #
-    # Written as one rebuild rather than a del-slice on purpose: `del
-    # history[:len(history) - keep]` looks equivalent but goes negative while
-    # fewer than `keep` readings have been collected, which silently throws away
-    # everything except the newest -- and then the "median" is a single reading
-    # and any outlier wins.
-    _ping_history[:] = [
-        (stamp, value) for stamp, value in _ping_history
-        if now - stamp <= PING_MEMORY
-    ][-keep:]
-
-    if not _ping_history:
-        return -1.0
-
-    values = sorted(value for _, value in _ping_history)
-    return round(values[len(values) // 2], 1)
+    distance, _used, _spread = _distance.read(_hardware(), samples)
+    return distance
 
 
 # How different the three readings must be before we'll say the line is under one
@@ -455,17 +399,7 @@ def read_line_sensors():
     (item 6), and naming them this way means you never have to remember which
     order the three came in.
     """
-    car = _hardware()
-    reader = getattr(car, "get_grayscale_data", None)
-    if reader is None:
-        raise RuntimeError("this robot has no line sensors fitted")
-
-    values = reader()
-    if not values or len(values) < 3:
-        raise RuntimeError(f"expected three sensor readings, got {values!r}")
-
-    left, centre, right = (int(v) for v in values[:3])
-    return {"L": left, "C": centre, "R": right}
+    return _sensors.read_line(_hardware())
 
 
 def is_drive_flipped():
@@ -516,37 +450,11 @@ def checkLineSensors():
     a line follower steers the wrong way and wobbles harder the more it corrects,
     which looks exactly like badly chosen numbers rather than a wiring surprise.
 
+    The cockpit's item 13 runs the same check from the menu.
+
     Returns True if all three matched, False otherwise.
     """
-    keys = ("L", "C", "R")
-    names = {"L": "left", "C": "centre", "R": "right"}
-    good = True
-
-    print("Checking the line sensors. Keep the robot still.")
-    print("Cover one sensor at a time with a finger or something dark.\n")
-
-    for expected in keys:
-        input(f"  Cover the {names[expected].upper()} sensor, then press Enter ... ")
-        sensors = read_line_sensors()
-
-        # Lower is darker, so the covered sensor should be the smallest reading.
-        darkest = min(keys, key=lambda key: sensors[key])
-
-        if darkest == expected:
-            print(f"    saw {names[expected]:6}  {sensors}  ok\n")
-        else:
-            good = False
-            print(f"    saw {names[darkest]} instead of {names[expected]}"
-                  f"   {sensors}")
-            print("    ^ these two are the other way round\n")
-
-    if good:
-        print("All three match: L, C and R are correct.")
-    else:
-        print("The sensors don't match their names, so read_line_sensors() has")
-        print("them mislabelled, so anything you steer from them is mirrored.")
-        print("Worth reporting before the robot is used.")
-    return good
+    return _sensors.check_line_sensors(read_line_sensors)
 
 
 def showHelp():

@@ -127,6 +127,8 @@ undervoltage/throttling warnings. `r` refreshes it.
 │   9  Stop everything                             │
 │  10  Diagnostics                                 │
 │  11  Flip forward / reverse                      │
+│  12  Test each wheel                             │
+│  13  Check the line sensors                      │
 │   r  Refresh    q  Quit                          │
 ╰──────────────────────────────────────────────────╯
 ```
@@ -141,6 +143,15 @@ flipping it in the menu fixes the student's own scripts at the same time — one
 file, one meaning. Item 1 is the quickest way to check: press ↑ and see which way
 the robot goes.
 
+**Item 12 drives one wheel at a time** — both forwards, both backwards, then each
+wheel alone. That's how you work out how a particular robot is wired without
+writing a script: watch which wheel turns and which way it goes. If the LEFT test
+moves the right wheel, the two motors are in each other's sockets.
+
+**Item 13 checks the line sensors are labelled correctly.** It asks you to cover
+one sensor at a time and says whether L, C and R match what the readings claim —
+the same check as `roboshine.checkLineSensors()`, running the same code.
+
 Arrow-key driving and pan/tilt both ask for a step size first, and driving has a
 0.45s dead-man stop: a terminal has no key-release event, so the motors cut when
 key auto-repeat stops. Without that, letting go over a laggy SSH link would leave
@@ -149,11 +160,29 @@ the car driving into a wall.
 Live views (distance, line sensors) update one line in place and stop on **any**
 keypress — Ctrl-C isn't obvious to a 15-year-old.
 
-Distance readings are the median of 3 pings spaced 60ms apart. An HC-SR04 needs
-roughly that long to settle; polling flat out measured 408 reads/s and returned
-wildly wrong numbers, because echoes from earlier pings landed inside the next
-measurement window. The line shows the spread (`±`) so you can see when the
-sensor disagrees with itself.
+Distance readings are the median of the last few pings, and pings are never closer
+than 60ms. An HC-SR04 needs roughly that long to settle; polling flat out measured
+408 reads/s and returned wildly wrong numbers, because echoes from earlier pings
+landed inside the next measurement window. The spacing is honoured by *skipping*
+the ping rather than sleeping for it, so nothing waits. The line shows the spread
+(`±`) so you can see when the sensor disagrees with itself.
+
+### One implementation, not two
+
+The cockpit talks to picarx directly for most things, but everything that has a
+rule attached is imported from roboshine rather than reimplemented:
+
+| Shared | What lives there |
+|---|---|
+| `roboshine/_config.py` | the per-robot settings file (`drive_flipped`, `min_duty`) |
+| `roboshine/_motor.py` | the 0–1000 speed scale, the PWM duty floor, the mirror convention |
+| `roboshine/_sensors.py` | the L/C/R ordering, the ultrasonic timing and median, the sensor check |
+
+So item 1 and a student's `driveForward()` produce the same duty for the same
+number, item 6 and `read_line_sensors()` can't disagree about which sensor is
+which, and item 13 runs the same code as `checkLineSensors()`. If roboshine isn't
+importable the cockpit says so and points at `install.sh`, rather than quietly
+behaving differently.
 
 ## Camera stream
 

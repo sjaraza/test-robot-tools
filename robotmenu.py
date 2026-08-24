@@ -20,6 +20,26 @@ import sys
 import time
 import warnings
 
+# The cockpit talks to picarx directly for most things, but the motor and sensor
+# rules -- the per-robot forward/reverse setting, the speed scale and PWM floor,
+# the ultrasonic timing, the L/C/R ordering -- are roboshine's, and are imported
+# rather than reimplemented. Two opinions about any of those is how a robot ends up
+# behaving one way from the menu and another way from a student's script.
+try:
+    from roboshine import _config as robot_config
+    from roboshine import _motor as robot_motor
+    from roboshine import _sensors as robot_sensors
+    MAX_SPEED = robot_motor.SPEED_MAX
+except ImportError:                     # roboshine not on the path yet
+    robot_config = None
+    robot_motor = None
+    robot_sensors = None
+    MAX_SPEED = 1000
+
+# How much + and - move the speed while driving. A twentieth of the range, so it
+# takes the same number of presses to cross it as it always did.
+SPEED_STEP = MAX_SPEED // 20
+
 
 @contextlib.contextmanager
 def quiet():
@@ -876,136 +896,81 @@ def live_view(title, sample, interval=0.15, header=None):
     return True   # skip the "press enter" pause; the keypress was the input
 
 
-def read_distance(px):
-    """One raw reading in centimetres, or None if there's no ultrasonic API."""
-    for name in ("get_distance", "ultrasonic"):
-        target = getattr(px, name, None)
-        if target is None:
-            continue
-        return target() if callable(target) else target.read()
-    return None
-
-
-# An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
-# and the echo from the previous ping lands inside the next measurement window,
-# which reads as wildly wrong distances rather than as noise.
-PING_SPACING = 0.06
-PING_SAMPLES = 3
-
-
-def read_distance_stable(px, samples=PING_SAMPLES):
-    """Median of several spaced readings.
-
-    Returns (distance, used, spread):
-      distance -- median of the valid readings, or -1 if none were valid
-      used     -- how many of `samples` came back valid
-      spread   -- max minus min, i.e. how much the sensor disagreed with itself
-
-    A median rather than a mean because ultrasonic outliers are large and
-    one-sided: a single missed echo would drag an average badly, but can't move
-    the middle value.
-    """
-    values = []
-    for _ in range(samples):
-        time.sleep(PING_SPACING)
-        reading = read_distance(px)
-        if reading is None:
-            return None, 0, 0.0
-        if reading > 0:
-            values.append(float(reading))
-    if not values:
-        return -1.0, 0, 0.0
-    values.sort()
-    return values[len(values) // 2], len(values), values[-1] - values[0]
-
+# The ultrasonic rules (60ms between pings, median of the last few, how long a
+# reading stays fresh) live in roboshine's _sensors so this view and
+# get_distance_cm() can't drift apart. This used to sleep between pings; it now
+# reads whatever is ready and lets the live loop supply the spacing.
+PING_SAMPLES = robot_sensors.PING_SAMPLES if robot_sensors else 3
 
 def measure_distance():
     px = car()
-    if read_distance(px) is None:
-        print("\n  this robot exposes no ultrasonic reading")
+    if robot_sensors is None:
+        print("\n  roboshine isn't importable, so the shared sensor code is")
+        print("  missing. Fix it with:  bash ~/test-robot-tools/install.sh")
         return False
 
+    try:
+        robot_sensors.read_distance_once(px)
+    except robot_sensors.NoSensor as exc:
+        print(f"\n  {exc}")
+        return False
+
+    reader = robot_sensors.Distance()
     previous = [time.monotonic()]
 
     def sample():
-        distance, used, spread = read_distance_stable(px)
+        distance, used, spread = reader.read(px)
         now = time.monotonic()
         elapsed = now - previous[0]
         previous[0] = now
         rate = 1.0 / elapsed if elapsed > 0 else 0.0
 
-        if distance is None:
-            return None
         if distance < 0:
-            return paint("no echo — nothing in range", YELLOW)
+            return paint("no echo -- nothing in range", YELLOW)
 
         colour = RED if distance < 15 else (YELLOW if distance < 40 else GREEN)
         blocks = int(min(distance, 200) / 200 * 20)
-        # spread is the honest confidence signal: small means the three pings
-        # agreed, large means treat the number with suspicion.
+        # spread is the honest confidence signal: small means the readings agreed,
+        # large means treat the number with suspicion.
         confidence = GREEN if spread < 2 else (YELLOW if spread < 10 else RED)
         return (f"{paint(f'{distance:6.1f} cm', BOLD, colour)}  "
                 f"{paint('█' * blocks, colour)}{paint('░' * (20 - blocks), GREY)}  "
                 f"{paint(f'±{spread:4.1f}', confidence)} "
                 f"{paint(f'n={used}/{PING_SAMPLES}  {rate:3.1f}/s', GREY)}")
 
-    return live_view("Distance  (median of 3 pings)", sample, interval=0.0)
+    return live_view("Distance  (median of recent pings)", sample, interval=0.02)
 
 
-LINE_LABELS = ("L", "C", "R")   # picarx reports the floor sensors left to right
 LINE_COLUMN = 5                 # width each reading is padded to
 
 
 def line_sensors():
     px = car()
-    if not hasattr(px, "get_grayscale_data"):
-        print("\n  this robot exposes no grayscale sensor API")
+    if robot_sensors is None:
+        print("\n  roboshine isn't importable, so the shared sensor code is")
+        print("  missing. Fix it with:  bash ~/test-robot-tools/install.sh")
         return False
 
+    try:
+        robot_sensors.read_line(px)
+    except robot_sensors.NoSensor as exc:
+        print(f"\n  {exc}")
+        return False
+
+    keys = robot_sensors.LINE_KEYS
+
     def sample():
-        values = px.get_grayscale_data()
-        return "  ".join(paint(f"{v:{LINE_COLUMN}}", BOLD) for v in values)
+        sensors = robot_sensors.read_line(px)
+        return "  ".join(paint(f"{sensors[key]:{LINE_COLUMN}}", BOLD)
+                         for key in keys)
 
-    def label(index):
-        if index < len(LINE_LABELS):
-            return LINE_LABELS[index]
-        return str(index + 1)
-
-    # Header built from a real reading, so the labels can't outnumber or fall
-    # short of the columns underneath them.
-    header = "  ".join(
-        paint(label(index).center(LINE_COLUMN), BOLD, CYAN)
-        for index in range(len(px.get_grayscale_data()))
-    )
+    header = "  ".join(paint(key.center(LINE_COLUMN), BOLD, CYAN) for key in keys)
     return live_view("Line sensors  (L left · C centre · R right)", sample,
                      interval=0.2, header=header)
 
 
 MAX_STEER = 30          # picarx steering limit, degrees either side
 DEAD_MAN = 0.45         # seconds without a keypress before the motors cut
-
-
-# Whether picarx's forward() drives this particular car backwards depends on which
-# way round the motor wires were pushed on when it was built, so it's a per-robot
-# setting rather than something the code can know. The setting lives in
-# ~/.roboshine.json and is shared with roboshine, so flipping it here fixes the
-# student's own scripts too -- one file, one meaning, no drift.
-#
-# Imported from roboshine rather than reimplemented: the cockpit otherwise talks
-# to picarx directly, but two opinions about one config file is how a robot ends
-# up driving one way from the menu and the other way from a script.
-try:
-    from roboshine import _config as robot_config
-    from roboshine import _motor as robot_motor
-    MAX_SPEED = robot_motor.SPEED_MAX
-except ImportError:                     # roboshine not on the path yet
-    robot_config = None
-    robot_motor = None
-    MAX_SPEED = 1000
-
-# How much + and - move the speed while driving. A twentieth of the range, so it
-# takes the same number of presses to cross it as it always did.
-SPEED_STEP = MAX_SPEED // 20
 
 
 def drive_flipped():
@@ -1468,6 +1433,94 @@ def flip_drive():
     return False
 
 
+def test_wheels():
+    """Drive one wheel at a time, to work out how yours are wired.
+
+    The point of item 11 is that the motor wires can go on either way round; this
+    is how you find out *which* way, and which motor is which, without writing a
+    script. Watch which wheel turns and which way it goes.
+    """
+    px = car()
+    if robot_motor is None:
+        print("\n  roboshine isn't importable, so per-wheel control is missing")
+        print("  fix it with:  bash ~/test-robot-tools/install.sh")
+        return False
+
+    speed = ask_number(f"  speed (1-{MAX_SPEED}) [300]: ", 1, MAX_SPEED, 300)
+    if speed is None:
+        return False
+    seconds = ask_number("  seconds per test (1-5) [2]: ", 1, 5, 2)
+    if seconds is None:
+        return False
+
+    # Each pair is (left wheel, right wheel) on roboshine's scale, where positive
+    # is forwards. Both wheels together first, so there's a reference to compare
+    # the single-wheel runs against.
+    tests = (
+        ("both wheels forwards", speed, speed),
+        ("both wheels backwards", -speed, -speed),
+        ("LEFT wheel only, forwards", speed, 0),
+        ("RIGHT wheel only, forwards", 0, speed),
+    )
+
+    print(f"\n  Four short tests, {seconds}s each. Lift the robot or give it room.")
+    print(f"  {paint('forward / reverse is currently ' + ('swapped' if drive_flipped() else 'normal'), GREY)}")
+
+    try:
+        for label, left, right in tests:
+            answer = ask(f"\n  {paint(label, BOLD)} -- Enter to run, s to skip: ", "")
+            if answer is None:
+                break
+            if answer.lower().startswith("s"):
+                continue
+
+            robot_motor.drive(px, left, right, flipped=drive_flipped())
+            time.sleep(seconds)
+            px.stop()
+            print("    stopped")
+
+    except KeyboardInterrupt:
+        print("\n  interrupted")
+    finally:
+        # Whatever happened, don't leave a wheel turning.
+        px.stop()
+
+    print("\n  If a wheel went the wrong way, item 11 swaps forward and reverse.")
+    print("  If the LEFT test moved the right wheel, the motors are swapped in")
+    print("  their sockets -- worth telling your instructor.")
+    return False
+
+
+def check_line_sensors():
+    """Check the line sensors are labelled the way the readings claim.
+
+    Same check as roboshine.checkLineSensors(), run from the menu -- and the same
+    code, so the two can't disagree.
+    """
+    px = car()
+    if robot_sensors is None:
+        print("\n  roboshine isn't importable, so the shared sensor code is")
+        print("  missing. Fix it with:  bash ~/test-robot-tools/install.sh")
+        return False
+
+    try:
+        robot_sensors.read_line(px)
+    except robot_sensors.NoSensor as exc:
+        print(f"\n  {exc}")
+        return False
+
+    print()
+    try:
+        robot_sensors.check_line_sensors(
+            lambda: robot_sensors.read_line(px),
+            ask=lambda prompt: ask(prompt, ""),
+            show=lambda line="": print(f"  {line}"),
+        )
+    except KeyboardInterrupt:
+        print("\n  interrupted")
+    return False
+
+
 def show_probe():
     print()
     probe()
@@ -1485,6 +1538,8 @@ MENU = [
     ("Stop everything", stop_everything),
     ("Diagnostics", show_probe),
     ("Flip forward / reverse", flip_drive),
+    ("Test each wheel", test_wheels),
+    ("Check the line sensors", check_line_sensors),
 ]
 
 
