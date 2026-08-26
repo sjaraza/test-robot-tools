@@ -26,6 +26,12 @@ set_motor_speed() and says so once -- driving coarsely beats not driving.
 
 SPEED_MAX = 1000
 
+# The motor PWM runs at CLOCK / prescaler / period = 72MHz / 10 / 4095, about
+# 1.76kHz (robot_hat/pwm.py, picarx's PERIOD and PRESCALER). Duty is set as a
+# percentage of a 4095-tick period, so the finest step the hardware can express is
+# about 0.024% -- 1000 speed steps land well inside that, and none of them are
+# rounded away.
+
 # Below roughly this duty a geared DC motor hums and heats without turning, and
 # the exact figure depends on the gearbox, the floor and how charged the battery
 # is. Speed 1 maps here, so this is what "as slow as it goes" means -- if the
@@ -93,6 +99,24 @@ def _wheel(car, index, signed_speed, floor):
     else:
         car.motor_direction_pins[index].low()
     car.motor_speed_pins[index].pulse_width_percent(duty)
+
+
+def stop(car):
+    """Stop both motors.
+
+    picarx's own stop() writes zero twice with 2ms between, commented "execute
+    twice to make sure it stops" -- a dropped I2C write leaving a motor running is
+    worth 4ms of paranoia. Use theirs when it's there rather than reinventing the
+    paranoia, and fall back to writing the pins directly.
+    """
+    stopper = getattr(car, "stop", None)
+    if callable(stopper):
+        stopper()
+        return
+    if _has_low_level(car):
+        for _ in range(2):
+            for pwm in car.motor_speed_pins:
+                pwm.pulse_width_percent(0)
 
 
 def drive(car, left, right, flipped=False):

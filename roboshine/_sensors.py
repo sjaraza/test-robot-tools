@@ -36,7 +36,12 @@ CLIFF_THRESHOLD = 120
 
 # An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
 # and the echo from the previous ping arrives inside the next measurement window,
-# which reads as wildly wrong distances rather than as noise.
+# which reads as wildly wrong distances rather than as noise. Measured on these
+# robots: polling flat out gave 408 reads/s and wildly wrong numbers.
+#
+# For scale, from robot_hat/modules.py's Ultrasonic: a trigger costs 1ms of setup
+# plus a 10us pulse, and a miss waits out a 20ms timeout. So even a single attempt
+# isn't free -- about 1ms with something in range, up to ~21ms without.
 PING_SPACING = 0.06
 PING_SAMPLES = 3
 
@@ -109,18 +114,38 @@ def read_line_noise(car, smooth=5):
 
 
 def read_distance_once(car):
-    """One raw ultrasonic reading in centimetres. Raises NoSensor if unfitted.
+    """One ultrasonic attempt, in centimetres. Raises NoSensor if unfitted.
 
     A reading of 0 or less means no echo came back, which is a valid answer.
+
+    This asks for **one** attempt, not picarx's ten. robot_hat's Ultrasonic.read()
+    defaults to times=10 and retries until an echo comes back, and each attempt
+    costs a 1ms trigger pulse plus up to its 20ms echo timeout -- so a call with
+    nothing in range can sit there for a fifth of a second, all of it while the
+    robot keeps driving. picarx's get_distance() uses that default. One attempt
+    bounds the wait at about 20ms, and Distance below covers the misses by keeping
+    recent readings instead of retrying inside one call.
+
+    The ~1ms trigger pulse is unavoidable: it's how the sensor is asked to chirp.
+    So this is as close to not-blocking as the hardware allows, rather than free.
     """
-    for name in ("get_distance", "ultrasonic"):
-        target = getattr(car, name, None)
-        if target is None:
-            continue
-        value = target() if callable(target) else target.read()
+    sensor = getattr(car, "ultrasonic", None)
+    if sensor is not None and hasattr(sensor, "read"):
+        try:
+            value = sensor.read(times=1)
+        except TypeError:               # an older signature without `times`
+            value = sensor.read()
         if value is None:
             raise NoSensor("this robot has no ultrasonic sensor fitted")
         return float(value)
+
+    reader = getattr(car, "get_distance", None)
+    if callable(reader):
+        value = reader()
+        if value is None:
+            raise NoSensor("this robot has no ultrasonic sensor fitted")
+        return float(value)
+
     raise NoSensor("this robot has no ultrasonic sensor fitted")
 
 

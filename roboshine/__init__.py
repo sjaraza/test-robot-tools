@@ -29,12 +29,15 @@ Notes for anyone reading the code rather than using it:
   Pausing is time.sleep()'s job, which keeps the pauses in the student's script
   where they can see them. (checkLineSensors() is the one exception, and only
   because it waits for you to press Enter.)
-* The sensor readers never pause either, which is the whole point of them. An
-  ultrasonic sensor needs quiet between pings, so get_distance_cm() skips the
-  ping when it's called too soon and hands back what it already knows, rather
-  than sleeping until the sensor is ready -- a sleep there would leave the robot
-  driving blind inside somebody's steering loop. (checkLineSensors() is the one
-  exception, and only because it waits for you to press Enter.)
+* The sensor readers don't pause on purpose, which is most of the point of them.
+  get_distance_cm() skips the ping when it's called too soon and hands back what
+  it already knows, rather than sleeping until the sensor is ready. It is not
+  free, though, and pretending otherwise would be a lie: triggering an ultrasonic
+  costs about 1ms, and a ping with nothing in range waits out robot_hat's 20ms
+  echo timeout. What it no longer does is stack ten of those up in one call, which
+  is what picarx's get_distance() does by default. Reading the line sensors is
+  genuinely free -- three I2C reads, microseconds. (checkLineSensors() blocks, and
+  only because it waits for you to press Enter.)
 * The sensors hand back numbers, not decisions. read_line_sensors() gives the
   three readings and stops there: working out what they mean is the interesting
   part, and doing it for students would take the lesson away.
@@ -244,7 +247,7 @@ def stop():
 
     The front wheels stay where they are -- use steerStraight() to centre them.
     """
-    _hardware().stop()
+    _motor.stop(_hardware())
 
 
 def steer(angle):
@@ -361,9 +364,12 @@ def get_distance_cm(samples=PING_SAMPLES):
         if 0 < space < 20:
             stop()
 
-    Returns straight away -- it never pauses your script. That matters in a loop
-    that is also steering: a pause here would leave the robot driving blind for as
-    long as it lasted.
+    Doesn't pause your script waiting for a good reading. It costs about a
+    millisecond to trigger the sensor, and up to about 20 more when nothing is in
+    range and the echo never comes back -- that part is the hardware, not the
+    code. What it won't do is keep retrying: picarx's own version tries ten times
+    before giving up, which is a fifth of a second of driving blind, so this takes
+    one shot and lets the next call try again.
 
     The sensor needs about 60ms of quiet between pings, so calling this faster than
     that gives you the most recent answer again rather than a new ping. Called in a
@@ -518,7 +524,8 @@ roboshine {__version__} -- robot commands you can use in your own scripts
   SENSING
     get_distance_cm()
         Centimetres to the thing in front. -1 means nothing is in range.
-        Never pauses your script, so it's safe to call inside a driving loop.
+        Safe to call inside a driving loop: it doesn't wait around for a good
+        reading, so a loop keeps steering instead of stalling.
 
     read_line_sensors(smooth=5)
         The three sensors underneath, as {{'L': .., 'C': .., 'R': ..}}.

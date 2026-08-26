@@ -161,7 +161,11 @@ Live views (distance, line sensors) update one line in place and stop on **any**
 keypress — Ctrl-C isn't obvious to a 15-year-old.
 
 Distance readings are the median of the last few pings, and pings are never closer
-than 60ms. An HC-SR04 needs roughly that long to settle; polling flat out measured
+than 60ms. One attempt per call, not picarx's ten — `robot_hat`'s `Ultrasonic.read()`
+defaults to `times=10` and retries until it gets an echo, each attempt costing a 1ms
+trigger plus up to a 20ms timeout, so a call with nothing in range can stall for a
+fifth of a second while the robot keeps driving. Taking one shot and letting the
+next call try again keeps a steering loop moving; the median covers the misses. An HC-SR04 needs roughly that long to settle; polling flat out measured
 408 reads/s and returned wildly wrong numbers, because echoes from earlier pings
 landed inside the next measurement window. The spacing is honoured by *skipping*
 the ping rather than sleeping for it, so nothing waits. The line shows the spread
@@ -597,12 +601,15 @@ steers like a car, so it can't spin on the spot.
 leaves it pointing up *and* left. `lookStraight()` resets both. Tilt is
 asymmetric because the mount is: 65° up, 35° down.
 
-**Nothing in roboshine pauses.** `driveForward()` sets the motors going and
+**Nothing in roboshine pauses on purpose.** `driveForward()` sets the motors going and
 returns immediately, so the robot keeps driving until `stop()` — which is what
 lets a script watch a sensor while moving. The sensor readers don't pause either:
 `get_distance_cm()` respects the 60 ms an ultrasonic sensor needs between pings by
 *skipping* the ping and returning what it already knows, rather than sleeping
-inside somebody's steering loop. Pausing is `time.sleep()`'s job, which keeps the
+inside somebody's steering loop. It isn't free — triggering the sensor costs about
+a millisecond, and a ping into empty space waits out a 20 ms timeout — but that's
+the hardware, and it no longer stacks ten of them into one call. Reading the line
+sensors genuinely is free: three I²C reads, microseconds. Pausing is `time.sleep()`'s job, which keeps the
 pauses in the student's own script where they can see them.
 
 Three more deliberate choices:
