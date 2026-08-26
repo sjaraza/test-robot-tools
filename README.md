@@ -521,8 +521,37 @@ same readings — so there's no argument order to remember, and no way to mix up
 left and right by accident.
 
 **Lower means darker**, so the sensor over a black line reads lower than the two on
-the floor. The actual numbers depend on the floor and the lighting, which is why
-the first thing to do is print them and look.
+the floor. Readings are 12-bit ADC counts, 0–4095. The actual numbers depend on the
+floor and the lighting, which is why the first thing to do is print them and look.
+
+**They're smoothed by default.** These sensors throw out the occasional wild value —
+a reading of 4000 in the middle of a run of 240s — and one spike is enough to send a
+follower the wrong way. `read_line_sensors()` takes five readings and gives you the
+middle one, so a spike vanishes rather than being averaged in:
+
+```python
+robot.read_line_sensors()        # middle of 5 — the steady default
+robot.read_line_sensors(1)       # the raw sensor, spikes and all
+robot.read_line_sensors(15)      # steadier still, if your floor is bad
+```
+
+The five reads happen back to back and take microseconds, so nothing waits and all
+five describe the same instant. Cockpit item 6 asks how much to smooth and shows a
+`±` per sensor, so you can *see* which one is twitchy rather than infer it from a
+number that won't sit still.
+
+Worth knowing: a median survives fewer than half the readings being wild, and not
+one more. If more smoothing doesn't help, the sensor or its wiring is the problem,
+not the filtering. Nothing in SunFounder's own stack smooths at all — `robot_hat`
+reads each ADC channel once and picarx passes it straight through — so every spike
+used to reach you. Their conditioning is per-channel slope/offset calibration,
+which fixes a sensor that reads consistently *wrong*, not one that occasionally
+reads nonsense.
+
+For deciding what the numbers mean, two figures from SunFounder's `robot_hat` are
+better starting points than a guess: readings within about **200** of each other
+are just noise rather than a line, and anything under about **120** means there's
+no floor under that sensor at all — a table edge.
 
 From there it's ordinary Python. The smallest of the three is the sensor over the
 line; if all three are close together there's nothing to steer by, because either

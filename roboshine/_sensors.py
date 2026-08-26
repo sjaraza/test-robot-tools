@@ -20,6 +20,20 @@ import time
 # how you find out.
 LINE_KEYS = ("L", "C", "R")
 
+# Readings are 12-bit ADC counts (robot_hat/adc.py returns 0-4095). Two useful
+# figures from SunFounder's own robot_hat/modules.py, on the same hardware:
+#
+#   LINE_DIFF       = 200   how far apart the readings must be before they mean
+#                           anything -- below this they're just noise
+#   CLIFF_THRESHOLD = 120   under this there's no floor under that sensor at all
+#
+# Neither is used here: this module hands back numbers and lets the caller judge
+# them. They're recorded because they're better starting points than a guess, and
+# because "is there even a line" is the judgement students get wrong first.
+ADC_MAX = 4095
+LINE_DIFF = 200
+CLIFF_THRESHOLD = 120
+
 # An HC-SR04-style sensor needs roughly 60ms of quiet between pings. Fire faster
 # and the echo from the previous ping arrives inside the next measurement window,
 # which reads as wildly wrong distances rather than as noise.
@@ -35,20 +49,63 @@ class NoSensor(RuntimeError):
     """That sensor isn't fitted, or this library can't reach it."""
 
 
-def read_line(car):
-    """The three floor sensors as {'L': .., 'C': .., 'R': ..}.
-
-    Lower numbers are darker. Raises NoSensor if there are no line sensors.
-    """
+def _sample_line(car, smooth):
+    """`smooth` back-to-back readings per sensor, each channel's sorted."""
     reader = getattr(car, "get_grayscale_data", None)
     if reader is None:
         raise NoSensor("this robot has no line sensors fitted")
 
-    values = reader()
-    if not values or len(values) < 3:
-        raise RuntimeError(f"expected three sensor readings, got {values!r}")
+    collected = {key: [] for key in LINE_KEYS}
+    for _ in range(max(1, int(smooth))):
+        values = reader()
+        if not values or len(values) < 3:
+            raise RuntimeError(f"expected three sensor readings, got {values!r}")
+        for key, value in zip(LINE_KEYS, values[:3]):
+            collected[key].append(int(value))
 
-    return dict(zip(LINE_KEYS, (int(value) for value in values[:3])))
+    return {key: sorted(values) for key, values in collected.items()}
+
+
+def read_line(car, smooth=1):
+    """The three floor sensors as {'L': .., 'C': .., 'R': ..}.
+
+    Lower numbers are darker. Raises NoSensor if there are no line sensors.
+
+    `smooth` is how many readings to take and take the middle of. 1 is the raw
+    sensor, warts and all. More than that filters out the odd wild value these
+    ADCs produce -- a spike can't be the middle of five, so it disappears
+    completely rather than being averaged in and dragging the answer with it.
+
+    Nothing in SunFounder's stack does this: robot_hat reads the ADC once per
+    channel and picarx passes that straight through, so every spike reaches the
+    caller. Their conditioning is per-channel slope/offset calibration and
+    thresholds, which is a different problem -- it corrects a sensor that reads
+    consistently wrong, not one that occasionally reads nonsense.
+
+    A median survives fewer than half the readings being wild, and not one more.
+    If a sensor is wrong more often than it is right, no amount of smoothing will
+    help and the sensor or its wiring needs looking at.
+
+    The readings are taken back to back, not spread over time: three I2C reads
+    take microseconds, so all of them describe the same instant and nothing has to
+    wait. Smoothing costs nothing a moving robot would notice.
+    """
+    samples = _sample_line(car, smooth)
+    return {key: values[len(values) // 2] for key, values in samples.items()}
+
+
+def read_line_noise(car, smooth=5):
+    """(medians, spreads) -- how steady each sensor is being.
+
+    `spreads` is max minus min across the readings for that sensor, so a big
+    number means that sensor is jumping around. Used by the cockpit's live view so
+    noise is something you can see rather than something you infer from a number
+    that won't sit still.
+    """
+    samples = _sample_line(car, smooth)
+    medians = {key: values[len(values) // 2] for key, values in samples.items()}
+    spreads = {key: values[-1] - values[0] for key, values in samples.items()}
+    return medians, spreads
 
 
 def read_distance_once(car):

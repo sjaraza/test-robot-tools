@@ -958,15 +958,29 @@ def line_sensors():
         return False
 
     keys = robot_sensors.LINE_KEYS
+    smooth = ask_number("  readings to average per sensor (1-25) [5]: ", 1, 25, 5)
+    if smooth is None:
+        return False
 
     def sample():
-        sensors = robot_sensors.read_line(px)
-        return "  ".join(paint(f"{sensors[key]:{LINE_COLUMN}}", BOLD)
-                         for key in keys)
+        medians, spreads = robot_sensors.read_line_noise(px, smooth)
+        columns = []
+        for key in keys:
+            # The +/- is how much that sensor disagreed with itself across the
+            # readings just taken. A steady sensor shows a small number; one that
+            # jumps around shows a big one, which is worth seeing rather than
+            # guessing at from a value that won't sit still.
+            spread = spreads[key]
+            colour = GREEN if spread < 30 else (YELLOW if spread < 100 else RED)
+            columns.append(f"{paint(f'{medians[key]:{LINE_COLUMN}}', BOLD)} "
+                           f"{paint(f'±{spread:<4}', colour)}")
+        return "  ".join(columns)
 
-    header = "  ".join(paint(key.center(LINE_COLUMN), BOLD, CYAN) for key in keys)
-    return live_view("Line sensors  (L left · C centre · R right)", sample,
-                     interval=0.2, header=header)
+    header = "  ".join(paint(key.center(LINE_COLUMN + 6), BOLD, CYAN)
+                       for key in keys)
+    title = (f"Line sensors  (L left · C centre · R right)   "
+             f"{paint(f'middle of {smooth}', GREY)}")
+    return live_view(title, sample, interval=0.2, header=header)
 
 
 MAX_STEER = 30          # picarx steering limit, degrees either side

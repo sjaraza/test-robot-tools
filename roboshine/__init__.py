@@ -382,7 +382,7 @@ def get_distance_cm(samples=PING_SAMPLES):
 LINE_MARGIN = 50
 
 
-def read_line_sensors():
+def read_line_sensors(smooth=5):
     """The three line sensors under the front of the robot.
 
     Returns a dict with the left, centre and right readings:
@@ -395,11 +395,22 @@ def read_line_sensors():
     the floor around it. The actual numbers depend on your floor and the lighting,
     so print them and look before writing rules about them.
 
+    smooth : how many readings to take and use the middle of. These sensors throw
+             out the odd wild value, and a spike can't be the middle of five, so
+             it vanishes rather than being averaged in. The readings are taken
+             back to back and take microseconds, so this doesn't slow anything
+             down and doesn't pause your script.
+
+               read_line_sensors()          steady -- the middle of 5
+               read_line_sensors(1)         raw, spikes and all
+               read_line_sensors(15)        steadier still, if your floor is bad
+
     The keys are the same L, C and R printed above the readings in the cockpit
     (item 6), and naming them this way means you never have to remember which
     order the three came in.
     """
-    return _sensors.read_line(_hardware())
+    _check_number(smooth, "smooth", 1, 50)
+    return _sensors.read_line(_hardware(), smooth)
 
 
 def is_drive_flipped():
@@ -509,13 +520,16 @@ roboshine {__version__} -- robot commands you can use in your own scripts
         Centimetres to the thing in front. -1 means nothing is in range.
         Never pauses your script, so it's safe to call inside a driving loop.
 
-    read_line_sensors()
+    read_line_sensors(smooth=5)
         The three sensors underneath, as {{'L': .., 'C': .., 'R': ..}}.
         Lower numbers are darker, so the sensor over a black line reads lower
         than the two on the floor.
           sensors = read_line_sensors()
           print(sensors)               all three
           print(sensors["C"])          just the middle one
+        These sensors are twitchy, so by default you get the middle of five
+        readings and the odd wild value disappears. read_line_sensors(1) is the
+        raw sensor if you want to see that for yourself.
         What the numbers mean is up to you -- that's the interesting part.
 
     checkLineSensors()
